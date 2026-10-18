@@ -23,11 +23,11 @@ All JWT settings live under the `jwt` key in `application-dev.yml` and are mappe
 | `jwt.header` | `Authorization` | HTTP request header that carries the token |
 | `jwt.token-start-with` | `Bearer` | Token prefix (the server appends a trailing space automatically) |
 | `jwt.base64-secret` | *(long Base64 string)* | HMAC-SHA signing key — **replace in production** |
-| `jwt.token-validity-in-seconds` | `14400000` (4 hours) | Token lifetime in milliseconds |
+| `jwt.token-validity-in-seconds` | `14400000` | Token lifetime in **milliseconds** (4 hours). Despite the key name ending in `-in-seconds`, the unit is milliseconds — this is confirmed by the YAML comment and the `SecurityProperties` bean Javadoc. |
 | `jwt.online-key` | `online-token-` | Redis key prefix used to track online user sessions |
 | `jwt.code-key` | `code-key-` | Redis key prefix used to store CAPTCHA answers |
-| `jwt.detect` | `1800000` (30 min) | Time window before expiry (ms) in which an active request triggers renewal |
-| `jwt.renew` | `3600000` (1 hour) | Amount of time (ms) added to the token's expiry on renewal |
+| `jwt.detect` | `1800000` | Time window before expiry (ms) in which an active request triggers token renewal (30 minutes) |
+| `jwt.renew` | `3600000` | Amount of time (ms) added to the token's expiry on renewal (1 hour) |
 
 Example configuration block from `application-dev.yml`:
 
@@ -44,8 +44,12 @@ jwt:
 ```
 
 <Warning>
-  The `base64-secret` value shown above is the development default. You **must** replace it with a securely generated secret of at least 88 Base64 characters before deploying to production. You can generate one at [convertworld.com](https://www.convertworld.com/zh-hans/time/milliseconds.html) or with any Base64-safe random generator.
+  The `base64-secret` value shown above is the development default. You **must** replace it with a securely generated secret of at least 88 Base64 characters before deploying to production.
 </Warning>
+
+<Note>
+  The key `token-validity-in-seconds` is named with "seconds" but its value is in **milliseconds**. This is an intentional quirk of the codebase — the `SecurityProperties` bean Javadoc explicitly states the unit is milliseconds. Set the value accordingly: 14400000 = 4 hours.
+</Note>
 
 ---
 

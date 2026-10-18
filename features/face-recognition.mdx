@@ -1,7 +1,7 @@
 ---
-title: "Face Recognition Check-In and Check-Out"
+title: "Biometric Face Recognition for Check-In and Check-Out"
 sidebarTitle: "Face Recognition"
-description: "How the Library Reservation System uses the Baidu AI Face Match API to verify patron identity at check-in and check-out. Setup, flow, and confidence threshold."
+description: "How the Library Reservation System uses the Baidu AI Face Match API to verify patron identity at check-in and check-out, with threshold details."
 ---
 
 Biometric verification prevents proxy reservations — a patron cannot check in or check out on behalf of someone else. At both touchpoints the system compares a **live photo uploaded by the patron** against their **registered avatar** on file, using the Baidu AI Face Match API. Only when the two images are confirmed to belong to the same person does the operation proceed.
@@ -20,7 +20,7 @@ Biometric verification prevents proxy reservations — a patron cannot check in 
 
 4. **Both images are base64-encoded** and sent as a two-element JSON array to the Baidu AI face match endpoint:
 
-   ```
+   ```http
    POST https://aip.baidubce.com/rest/2.0/face/v3/match
    ```
 
@@ -49,9 +49,11 @@ Uploading any other file type raises a `BadRequestException` with the message *"
   A score of **80** is Baidu AI's recommended threshold for high-confidence face matches. Values above 80 indicate a very high probability that both images show the same person. If your deployment environment requires stricter identity assurance (e.g. a high-security facility) or needs to be more lenient (e.g. lower-quality camera hardware), adjust the comparison in `LibraryYuyueController`:
 
   ```java
-  // Check-in (dao) and check-out (tui) both contain this guard:
+  // Both dao (check-in) and tui (check-out) apply this guard;
+  // dao returns "无法签到", tui returns "无法签退".
   if (score < 80) {
-      return new ResponseEntity<>("不是用户本人，无法签到", HttpStatus.CREATED);
+      return new ResponseEntity<>("不是用户本人，无法签到", HttpStatus.CREATED); // dao
+      // return new ResponseEntity<>("不是用户本人，无法签退", HttpStatus.CREATED); // tui
   }
   ```
 

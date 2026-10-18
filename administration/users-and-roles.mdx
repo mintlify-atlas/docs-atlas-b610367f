@@ -1,7 +1,7 @@
 ---
-title: "User Management and Role-Based Access Control"
+title: "User Management and Role-Based Access Control Guide"
 sidebarTitle: "Users & Roles"
-description: "Create and manage users and roles, assign permissions, understand the credit score system, and control data access scopes in the Library Reservation System."
+description: "Create and manage users and roles, assign permissions, understand the credit score system, and control data access scopes in the Library System."
 ---
 
 User and role management is handled via `/api/users` and `/api/roles`. Every administrative action in the system is guarded by a permission string checked with `@el.check()` — a Spring Security SpEL expression backed by the `ElPermissionConfig` bean registered under the name `el`.
@@ -86,9 +86,10 @@ Permissions are short colon-separated strings such as `user:list` or `libraryRoo
 @PreAuthorize("@el.check('user:add')")
 ```
 
-The `ElPermissionConfig` service (registered as the Spring bean `el`) resolves this at runtime:
+The `ElPermissionConfig` service (registered as the Spring bean `el`) is located in the `library-common` module at `com.javabs.config.ElPermissionConfig` and resolves this at runtime:
 
 ```java
+// com.javabs.config.ElPermissionConfig  (library-common module)
 @Service(value = "el")
 public class ElPermissionConfig {
 
@@ -111,12 +112,16 @@ An account bearing the `admin` authority automatically passes every permission c
 | Resource | Permissions |
 |----------|-------------|
 | **Users** | `user:list`, `user:add`, `user:edit`, `user:del` |
-| **Roles** | `role:list`, `role:add`, `role:edit`, `role:del` |
+| **Roles** | `roles:list`, `roles:add`, `roles:edit`, `roles:del` |
 | **Reading Rooms** | `libraryRoom:list`, `libraryRoom:add`, `libraryRoom:edit`, `libraryRoom:del` |
 | **Seats** | `librarySeat:list`, `librarySeat:add`, `librarySeat:edit`, `librarySeat:del`, `librarySeat:yuyue` |
 | **Reservations** | `libraryYuyue:list`, `libraryYuyue:edit`, `libraryYuyue:del` |
 | **Books** | `libraryBook:list`, `libraryBook:add`, `libraryBook:edit`, `libraryBook:del` |
 | **Violations** | `libraryVolation:list`, `libraryVolation:add`, `libraryVolation:edit`, `libraryVolation:del`, `libraryVolation:chuli` |
+
+<Note>
+The role download endpoint (`GET /api/roles/download`) uses the singular `role:list` permission rather than `roles:list`. Both strings must be granted when a role needs access to both the paginated list and the export feature.
+</Note>
 
 ---
 

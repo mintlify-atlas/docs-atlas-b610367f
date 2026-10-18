@@ -1,7 +1,7 @@
 ---
-title: "Reservations API: Book Seats and Manage Check-In"
+title: "Reservations API: Book Seats and Manage Check-In/Out"
 sidebarTitle: "Reservations"
-description: "REST endpoints for seat reservations — create, query, check in with face recognition, mark temporary absence, and check out. Requires appropriate libraryYuyue permissions."
+description: "REST endpoints for seat reservations: create, query, face-verified check-in, temporary absence, and check-out. Requires libraryYuyue permissions."
 ---
 
 The Reservations API (`/api/libraryYuyue`) manages the full lifecycle of a seat reservation — from initial booking through face-verified check-in and check-out. A patron books an available seat, checks in by submitting a photo that is verified against their saved avatar via Baidu AI, optionally marks a temporary absence, and then checks out with a second face verification that releases the seat back to available.
@@ -243,6 +243,8 @@ curl -X DELETE http://localhost:8000/api/libraryYuyue \
   -d '[42, 43]'
 ```
 
+A successful deletion returns HTTP `201 Created` with the body `"暂离成功"`.
+
 ---
 
 ## POST /api/libraryYuyue/dao — Face Check-In
@@ -287,6 +289,8 @@ curl -X POST http://localhost:8000/api/libraryYuyue/dao \
   -F "id=42" \
   -F "status=1"
 ```
+
+On success, returns HTTP `201 Created` with the body `"签到成功"` (Check-in successful).
 
 ---
 
@@ -359,3 +363,5 @@ curl -X POST http://localhost:8000/api/libraryYuyue/tui \
   -F "id=42" \
   -F "status=3"
 ```
+
+On success, returns HTTP `201 Created` with the body `"签退成功"` (Check-out successful).

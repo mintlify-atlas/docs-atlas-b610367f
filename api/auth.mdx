@@ -1,7 +1,7 @@
 ---
 title: "Authentication API: Login, Captcha, and Token Management"
 sidebarTitle: "Authentication"
-description: "REST endpoints for obtaining a CAPTCHA, logging in with JWT, retrieving current user info, and logging out. All other APIs require the returned Bearer token."
+description: "REST endpoints for CAPTCHA retrieval, JWT login, current user info, and logout. All protected endpoints require the returned Bearer token."
 ---
 
 The Library Reservation System uses **JWT Bearer tokens** for authentication. Before logging in, you must first obtain a CAPTCHA challenge. Submit your credentials along with the CAPTCHA answer to `POST /auth/login` to receive your token. All subsequent requests to protected endpoints must include the header `Authorization: Bearer <token>`.

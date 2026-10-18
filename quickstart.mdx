@@ -1,5 +1,5 @@
 ---
-title: "Get Started with the Library Reservation System"
+title: "Quickstart: Run the Library Reservation System Locally"
 sidebarTitle: "Quickstart"
 description: "Set up and run the Library Reservation System locally with MySQL and Redis in under 10 minutes. Covers build, config, first login, and first reservation."
 ---
@@ -52,7 +52,7 @@ This guide walks you through cloning the project, wiring up MySQL and Redis, bui
         druid:
           url: jdbc:log4jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:library-face}?serverTimezone=Asia/Shanghai&characterEncoding=utf8&useSSL=false
           username: ${DB_USER:root}
-          password: ${DB_PWD:}
+          password: ${DB_PWD:zby303}
     ```
 
     | Environment variable | Default | Description |
@@ -61,7 +61,7 @@ This guide walks you through cloning the project, wiring up MySQL and Redis, bui
     | `DB_PORT` | `3306` | MySQL port |
     | `DB_NAME` | `library-face` | Database name |
     | `DB_USER` | `root` | Database username |
-    | `DB_PWD` | *(empty)* | Database password |
+    | `DB_PWD` | `zby303` | Database password |
 
     **Redis**
 
@@ -80,6 +80,7 @@ This guide walks you through cloning the project, wiring up MySQL and Redis, bui
     | `REDIS_HOST` | `127.0.0.1` | Redis host |
     | `REDIS_PORT` | `6379` | Redis port |
     | `REDIS_DB` | `0` | Redis database index |
+    | `REDIS_PWD` | *(empty)* | Redis password |
 
     Export any variables that differ from the defaults before building, for example:
 

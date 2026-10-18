@@ -46,7 +46,7 @@ The application uses the **Lettuce** client (Spring Boot's default) backed by **
 
 | Key Pattern | TTL | Content |
 |-------------|-----|---------|
-| `online-token-<token>` | Token validity (`token-validity-in-seconds`, default 4 hours) | Serialized `OnlineUserDto` — the active user session record |
+| `online-token-<token>` | Token validity (`jwt.token-validity-in-seconds`, default 14400000 ms / 4 hours) | Serialized `OnlineUserDto` — the active user session record |
 | `code-key-<uuid>` | CAPTCHA expiration (`login.login-code.expiration`, default 2 minutes) | CAPTCHA answer string for the corresponding login attempt |
 | User detail cache | `login.user-cache.idle-time` (default 7200 seconds) | Serialized `JwtUserDto` — cached user authorities and profile data |
 
@@ -79,9 +79,9 @@ The **GET /auth/online** endpoint (requires admin role) calls this service to re
 
 ## Serialization
 
-Redis serialization is configured in `RedisConfig.java`:
+Redis serialization is configured in `RedisConfig.java` (`library-common` module):
 
-- **Keys** are serialized with a custom `StringRedisSerializer` that strips surrounding quotes from the JSON string representation, giving clean, human-readable key names.
+- **Keys** are serialized with a custom `StringRedisSerializer` that converts the key object to a JSON string via FastJSON and then removes all double-quote characters, producing clean, human-readable key names.
 - **Values** are serialized with `FastJsonRedisSerializer<Object>`, which uses Alibaba FastJSON with `WriteClassName` enabled so that concrete types can be correctly deserialized.
 - The default cache TTL applied by `RedisCacheConfiguration` (used for `@Cacheable` annotations) is **2 hours**.
 

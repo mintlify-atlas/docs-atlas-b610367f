@@ -1,7 +1,7 @@
 ---
-title: "Seats API: Manage and Query Library Seats"
+title: "Library Seats API: Manage, Query, and Export Seats"
 sidebarTitle: "Seats"
-description: "REST endpoints for managing library seats within reading rooms. Create seats, query availability by status, and export seat data. Requires librarySeat permissions."
+description: "REST endpoints for library seats within reading rooms. Create, query by status, update, delete, and export seat data. Requires librarySeat permissions."
 ---
 
 Seats (`/api/librarySeat`) belong to reading rooms and track real-time occupancy. Each seat has a label (`card`), a parent room (`roomId`), and a `status` that reflects whether the seat is currently available or occupied. When a seat is reserved via the Reservations API, its status is automatically updated; when the patron checks out, it is released back to available.
