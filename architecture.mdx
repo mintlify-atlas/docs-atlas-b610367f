@@ -1,0 +1,123 @@
+---
+title: "System Architecture and Module Overview"
+sidebarTitle: "Architecture"
+description: "Understand the three-module Maven structure, request lifecycle, data model relationships, and key design patterns used in the Library Reservation System."
+---
+
+The Library Reservation System is a three-module Maven project grouped under the parent artifact `com.javabs:library:2.6`. The three modules — `library-common`, `library-system`, and `library-generator` — enforce a clean separation between shared infrastructure, the deployable application, and the developer tooling used to scaffold new CRUD features.
+
+## Module Overview
+
+| Module | Artifact ID | Purpose |
+|--------|-------------|---------|
+| `library-common` | `library-common` | Shared annotations, utility classes, base entity/DTO classes, and reusable Spring config beans consumed by the other modules |
+| `library-system` | `library-system` | The main Spring Boot application: all controllers, services, JPA repositories, Spring Security configuration, and JWT infrastructure |
+| `library-generator` | `library-generator` | FreeMarker-based CRUD code scaffolding tool; generates boilerplate controller/service/repository/DTO files from a table definition — not deployed to production |
+
+---
+
+## Package Structure (`library-system`)
+
+Inside `library-system`, all application code lives under `com.javabs` and is organized into four top-level packages:
+
+### `com.javabs.modules.library`
+The core library domain. Contains entities, repositories, service interfaces, service implementations, MapStruct mappers, and REST controllers for:
+- **`LibraryRoom`** — reading rooms (name, capacity, location, status)
+- **`LibrarySeat`** — individual seats within a room (number, status, room association)
+- **`LibraryYuyue`** — reservations linking a patron to a seat and time window
+- **`LibraryBook`** — book lending records associated with a patron
+- **`LibraryVolation`** — violations recorded against patron accounts
+
+### `com.javabs.modules.system`
+User and access-control administration. Manages:
+- **`User`** — patron and administrator accounts
+- **`Role`** — permission bundles assigned to users
+- **`Menu`** — hierarchical menu/permission definitions used by `@PreAuthorize`
+- **`Dept`** — department hierarchy for organizational grouping
+- **`Dict` / `DictDetail`** — data dictionary for enumerated values
+- **`Job`** — job/position definitions attached to users
+
+### `com.javabs.modules.security`
+Spring Security integration and JWT infrastructure:
+- **`config/`** — `SecurityConfig` wiring, login properties beans (`LoginProperties`, `LoginCodeEnum`)
+- **`security/`** — `TokenFilter` (JWT extraction & validation on every request), `TokenProvider` (token generation, validation, renewal), `TokenConfigurer` (registers the filter into the security chain), plus `JwtAuthenticationEntryPoint` and `JwtAccessDeniedHandler` for error responses
+- **`service/`** — `OnlineUserService` (stores active sessions in Redis), `UserCacheManager` (caches `UserDetails` to avoid redundant DB hits)
+- **`rest/`** — `AuthorizationController` (login, logout, CAPTCHA endpoints)
+
+### `com.javabs.config`
+Cross-cutting Spring configuration beans:
+- **`ConfigurerAdapter`** — CORS policy and static-resource mappings
+- **`WebSocketConfig`** — WebSocket endpoint registration
+- **`thread/`** — async thread pool configuration (`AsyncTaskExecutor`) wired into `@EnableAsync`
+- **Baidu AI client beans** — `AccessToken`, `HttpUtil`, `Base64Util`, `ImgUtil`, and `GsonUtils` supporting the face-recognition integration
+
+---
+
+## Request Lifecycle
+
+Every inbound HTTP request passes through the following chain before a response is produced:
+
+1. **JWT extraction** — `TokenFilter` reads the `Authorization` header, strips the `Bearer ` prefix, and calls `TokenProvider` to validate the token signature and expiry. If valid, it populates the Spring Security `SecurityContextHolder` with the authenticated principal. Requests to public endpoints (e.g., `/auth/code`, `/auth/login`, `/`) bypass this filter via `SecurityConfig` permit rules.
+
+2. **Permission check** — Protected controller methods are annotated with `@PreAuthorize("@el.check('permission:action')")`. Spring Security evaluates this SpEL expression against the roles and menu permissions loaded for the authenticated user. Unauthorized requests receive a `403` response from `JwtAccessDeniedHandler`.
+
+3. **Controller** — The matching `@RestController` method validates the request body (Bean Validation) and delegates to the service layer. All controllers follow the pattern `LibraryXxxController → LibraryXxxService`.
+
+4. **Service** — The service implementation applies business logic, calls the JPA repository for data access, and coordinates any Redis cache reads/writes. Database queries reach MySQL through the **Alibaba Druid** connection pool, which also provides `/druid/*` monitoring pages.
+
+5. **DTO mapping & response** — Entity objects are mapped to response DTOs using **MapStruct** mappers (in each module's `service/mapstruct` package). The final JSON response is serialized by Jackson with the `GMT+8` timezone applied globally.
+
+---
+
+## Data Model Overview
+
+The core domain entities form a straightforward hierarchy:
+
+```
+LibraryRoom (reading room)
+  └── LibrarySeat  (many seats per room)
+        └── LibraryYuyue  (one active reservation per seat at a time)
+                └── LibraryVolation  (violations recorded against the reserving User)
+```
+
+- A **`LibraryRoom`** describes a physical reading space: its name, total capacity, location, and open/closed status.
+- A **`LibrarySeat`** belongs to exactly one room and tracks its own availability (free, reserved, occupied).
+- A **`LibraryYuyue`** (reservation) links a `User` to a `LibrarySeat` for a given date/time range. Check-in and check-out timestamps are recorded here; face-recognition results are attached to these events.
+- A **`LibraryVolation`** (violation) references the `User` and, optionally, the associated reservation, recording the violation type and handling status.
+
+---
+
+## Key Design Patterns
+
+### `BaseEntity` — Unified Audit Fields
+Every domain entity extends `BaseEntity`, which uses JPA Auditing (`@EnableJpaAuditing` on `AppRun`) to automatically populate four fields on every write:
+
+| Field | Description |
+|-------|-------------|
+| `createBy` | Username of the principal who created the record |
+| `updateBy` | Username of the principal who last modified the record |
+| `createTime` | Timestamp of record creation |
+| `updateTime` | Timestamp of the most recent update |
+
+This means all entities carry a complete audit trail with zero boilerplate in individual service implementations.
+
+### `QueryHelp` — Dynamic JPA Criteria Queries
+Rather than writing a new `@Query` method for every filter combination, the system uses `QueryHelp` (in `library-common`) to build `Specification<T>` predicates at runtime. Query DTO classes annotate their fields with `@Query`, specifying the comparison operator (equal, like, between, etc.) and optional join path. `QueryHelp.getPredicate()` reflects over those annotations and assembles the JPA `CriteriaBuilder` predicate tree automatically — enabling arbitrarily complex filtered list endpoints with a single repository `findAll(spec, pageable)` call.
+
+### Redis Caching — Sessions, CAPTCHA, and User Details
+Redis is used as the primary caching layer across three concerns:
+
+| Cache | Key prefix | TTL | Description |
+|-------|-----------|-----|-------------|
+| Online user sessions | `online-token-` | 4 hours (matches JWT expiry) | Stores serialized `OnlineUserDto` for active sessions; enables single-login enforcement and forced logout by admins |
+| CAPTCHA codes | `code-key-` | 2 minutes | Stores the expected CAPTCHA answer keyed by UUID; validated and immediately deleted on login |
+| User details | per-user key | 2 hours (`login.user-cache.idle-time`) | Caches the `UserDetails` object to avoid a database round-trip on every request's authentication check |
+
+### RSA Encryption — Secure Password Transmission
+Passwords are never sent in plaintext over the wire. The workflow is:
+
+1. The server exposes its **RSA public key** to the frontend.
+2. The frontend encrypts the password in the browser using the public key before sending the login request.
+3. The server uses `RsaUtils` (in `library-common`) to decrypt the ciphertext with its **RSA private key** (configured via `rsa.private_key` in `application.yml`) before passing the plaintext to Spring Security's `AuthenticationManager`.
+
+This ensures that even if TLS is misconfigured or traffic is intercepted at the application layer, raw passwords are never exposed in transit.

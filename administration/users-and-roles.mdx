@@ -1,0 +1,163 @@
+---
+title: "User Management and Role-Based Access Control"
+sidebarTitle: "Users & Roles"
+description: "Create and manage users and roles, assign permissions, understand the credit score system, and control data access scopes in the Library Reservation System."
+---
+
+User and role management is handled via `/api/users` and `/api/roles`. Every administrative action in the system is guarded by a permission string checked with `@el.check()` — a Spring Security SpEL expression backed by the `ElPermissionConfig` bean registered under the name `el`.
+
+---
+
+## User Fields
+
+Users are persisted in the `sys_user` table. The following fields make up the `User` entity:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `Long` | Auto-generated primary key (`user_id` column) |
+| `username` | `String` | Unique login name — `@NotBlank`, `@Column(unique = true)` |
+| `nickName` | `String` | Display name shown in the UI — `@NotBlank` |
+| `email` | `String` | Must be a valid email address — `@Email`, `@NotBlank` |
+| `phone` | `String` | Contact phone number — `@NotBlank` |
+| `gender` | `String` | User gender (free-form string) |
+| `password` | `String` | BCrypt-encoded password hash |
+| `enabled` | `Boolean` | Whether the account is active — `@NotNull` |
+| `isAdmin` | `Boolean` | Marks the built-in super-admin account (defaults to `false`) |
+| `num` | `Integer` | Credit score (defaults to `100` on creation) |
+| `roles` | `Set<Role>` | Many-to-many relationship via `sys_users_roles` join table |
+| `avatarName` | `String` | Stored filename of the user's avatar |
+| `avatarPath` | `String` | Filesystem path to the stored avatar image |
+| `pwdResetTime` | `Date` | Timestamp of the last password change |
+
+### Default Password
+
+When an administrator creates a new user via `POST /api/users`, the system automatically sets the password to `123456` encoded with BCrypt — regardless of any password field supplied in the request body. Users should be prompted to change this on first login.
+
+```java
+// From UserController.createUser()
+resources.setPassword(passwordEncoder.encode("123456"));
+resources.setNum(100);
+```
+
+---
+
+## Credit Score System
+
+Every new user starts with a credit score (`num`) of **100**. Administrators can deduct points when processing violations. The credit score acts as a reservation gate:
+
+- **Score ≥ 0** — patron can make and manage reservations normally.
+- **Score < 0** — patron is blocked from creating new reservations until the score is restored.
+
+Credit is deducted through the violation processing workflow (`libraryVolation:chuli`). Administrators with the appropriate permission can review and process outstanding violations, which triggers the deduction against the offending user's `num` field.
+
+---
+
+## Role Fields
+
+Roles are persisted in the `sys_role` table. The `Role` entity contains:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `Long` | — | Auto-generated primary key (`role_id` column) |
+| `name` | `String` | — | Role name — `@NotBlank` |
+| `dataScope` | `String` | `THIS_LEVEL` | Controls which department data this role can see (see below) |
+| `level` | `Integer` | `3` | Privilege level — **lower number = higher privilege** |
+| `description` | `String` | — | Human-readable description of the role |
+| `menus` | `Set<Menu>` | — | Menu items accessible to this role, via `sys_roles_menus` |
+| `depts` | `Set<Dept>` | — | Departments explicitly visible to this role (used when `dataScope = CUSTOMIZE`), via `sys_roles_depts` |
+
+### Data Scope Options
+
+The `dataScope` field controls the breadth of data a role can access:
+
+| Value | Meaning |
+|-------|---------|
+| `全部` (ALL) | Can see data across all departments |
+| `本级` (THIS_LEVEL) | Can only see data belonging to the user's own department level |
+| `自定义` (CUSTOMIZE) | Can see data for the set of departments explicitly assigned in `depts` |
+
+---
+
+## Permission System
+
+Permissions are short colon-separated strings such as `user:list` or `libraryRoom:add`. Every protected endpoint in the codebase carries a `@PreAuthorize` annotation that delegates to the `el` SpEL bean:
+
+```java
+@PreAuthorize("@el.check('user:add')")
+```
+
+The `ElPermissionConfig` service (registered as the Spring bean `el`) resolves this at runtime:
+
+```java
+@Service(value = "el")
+public class ElPermissionConfig {
+
+    public Boolean check(String ...permissions) {
+        List<String> elPermissions = SecurityUtils.getCurrentUser()
+            .getAuthorities().stream()
+            .map(GrantedAuthority::getAuthority)
+            .collect(Collectors.toList());
+        // "admin" authority bypasses all checks
+        return elPermissions.contains("admin") ||
+               Arrays.stream(permissions).anyMatch(elPermissions::contains);
+    }
+}
+```
+
+An account bearing the `admin` authority automatically passes every permission check. All other accounts must have the specific permission string granted through their assigned roles.
+
+### Common Permission Strings
+
+| Resource | Permissions |
+|----------|-------------|
+| **Users** | `user:list`, `user:add`, `user:edit`, `user:del` |
+| **Roles** | `role:list`, `role:add`, `role:edit`, `role:del` |
+| **Reading Rooms** | `libraryRoom:list`, `libraryRoom:add`, `libraryRoom:edit`, `libraryRoom:del` |
+| **Seats** | `librarySeat:list`, `librarySeat:add`, `librarySeat:edit`, `librarySeat:del`, `librarySeat:yuyue` |
+| **Reservations** | `libraryYuyue:list`, `libraryYuyue:edit`, `libraryYuyue:del` |
+| **Books** | `libraryBook:list`, `libraryBook:add`, `libraryBook:edit`, `libraryBook:del` |
+| **Violations** | `libraryVolation:list`, `libraryVolation:add`, `libraryVolation:edit`, `libraryVolation:del`, `libraryVolation:chuli` |
+
+---
+
+## Level-Based Privilege Guard
+
+Role levels enforce a hierarchy: **the lower the `level` integer, the higher the privilege**. The `UserController` enforces this in two places via its private `checkLevel()` helper.
+
+**On create / edit (`POST /api/users`, `PUT /api/users`):**
+
+```java
+private void checkLevel(User resources) {
+    Integer currentLevel = Collections.min(
+        roleService.findByUsersId(SecurityUtils.getCurrentUserId())
+                   .stream().map(RoleSmallDto::getLevel)
+                   .collect(Collectors.toList()));
+    Integer optLevel = roleService.findByRoles(resources.getRoles());
+    if (currentLevel > optLevel) {
+        throw new BadRequestException("角色权限不足"); // "Insufficient role privileges"
+    }
+}
+```
+
+**On delete (`DELETE /api/users`):**
+
+The controller iterates over each target user ID and compares the caller's minimum role level against the target's minimum role level. If the caller's level is numerically *greater* (i.e., lower privilege), the delete is rejected with a `BadRequestException`.
+
+The same level check is applied in `RoleController`: you cannot create, update, or delete a role whose level is numerically lower (higher privilege) than your own minimum level.
+
+---
+
+## Self-Service Endpoints
+
+The following endpoints are available to any authenticated user without requiring a named permission — the system only verifies that the caller is the owner of the resource being modified:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `PUT` | `/api/users/center` | Update own profile (nickName, phone, gender, etc.) |
+| `POST` | `/api/users/updatePass` | Change own password (old + new password supplied, RSA-encrypted) |
+| `POST` | `/api/users/updateAvatar` | Upload a new profile photo (multipart); avatar is also used for face-recognition check-in |
+| `POST` | `/api/users/updateEmail/{code}` | Update own email address — requires a verification code and current password |
+
+<Note>
+The `PUT /api/users/center` endpoint verifies that `resources.getId()` equals `SecurityUtils.getCurrentUserId()`. Attempting to modify another user's profile through this endpoint returns a `400 Bad Request` with the message "不能修改他人资料" ("Cannot modify another person's profile").
+</Note>

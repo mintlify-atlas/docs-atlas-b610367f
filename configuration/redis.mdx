@@ -1,0 +1,114 @@
+---
+title: "Redis Configuration and Session Management"
+sidebarTitle: "Redis"
+description: "Configure Redis for the Library Reservation System. Redis stores online user sessions, CAPTCHA codes, and user detail caches with configurable TTLs."
+---
+
+Redis is a **required dependency** — the system will not start without a reachable Redis instance. It serves three distinct roles:
+
+1. **Online session tracking** — every authenticated user has a session record in Redis that can be listed or forcibly expired.
+2. **CAPTCHA code storage** — generated CAPTCHA answers are held in Redis with a short TTL rather than in server memory.
+3. **User detail caching** — deserialized `JwtUserDto` objects are cached in Redis to avoid repeated database lookups on every authenticated request.
+
+---
+
+## Connection Configuration
+
+Connection settings are defined in `application.yml` and read from environment variables at startup. See [Environment Variables](/configuration/environment) for the full list of Redis variables.
+
+```yaml
+spring:
+  redis:
+    database: ${REDIS_DB:0}
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PWD:}
+    timeout: 5000
+```
+
+| Property                  | Env Variable  | Default     | Description                               |
+|---------------------------|---------------|-------------|-------------------------------------------|
+| `spring.redis.database`   | `REDIS_DB`    | `0`         | Redis logical database index              |
+| `spring.redis.host`       | `REDIS_HOST`  | `127.0.0.1` | Redis server hostname or IP               |
+| `spring.redis.port`       | `REDIS_PORT`  | `6379`      | Redis server port                         |
+| `spring.redis.password`   | `REDIS_PWD`   | *(empty)*   | Redis AUTH password                       |
+| `spring.redis.timeout`    | —             | `5000`      | Connection/read timeout in milliseconds   |
+
+---
+
+## Connection Pool
+
+The application uses the **Lettuce** client (Spring Boot's default) backed by **Apache Commons Pool 2** (`commons-pool2`). No explicit pool block is defined in the YAML — Spring Boot autoconfigures Lettuce with sensible defaults. To tune pool behaviour, add a `spring.redis.lettuce.pool.*` block to your profile's YAML file.
+
+---
+
+## What Is Stored in Redis
+
+| Key Pattern | TTL | Content |
+|-------------|-----|---------|
+| `online-token-<token>` | Token validity (`token-validity-in-seconds`, default 4 hours) | Serialized `OnlineUserDto` — the active user session record |
+| `code-key-<uuid>` | CAPTCHA expiration (`login.login-code.expiration`, default 2 minutes) | CAPTCHA answer string for the corresponding login attempt |
+| User detail cache | `login.user-cache.idle-time` (default 7200 seconds) | Serialized `JwtUserDto` — cached user authorities and profile data |
+
+---
+
+## Online User Sessions
+
+Each authenticated session is tracked as an `OnlineUserDto` stored under the `online-token-<token>` key. The following fields are persisted per session:
+
+| Field | Description |
+|-------|-------------|
+| `username` | Account login name |
+| `nickName` | Display name |
+| `dept` | Department the user belongs to |
+| `browser` | Browser/user-agent detected at login |
+| `ip` | Client IP address at login |
+| `address` | Resolved geographic location of the IP |
+| `token` | The JWT token string (used as the Redis key suffix) |
+| `loginTime` | Timestamp of the login event |
+
+The `OnlineUserService` exposes three operations over these records:
+
+- **List all online users** — returns every `online-token-*` record currently in Redis.
+- **Force logout by token** — deletes the specific `online-token-<token>` key, making the token invalid on the next request.
+- **Enforce single-login** — when `login.single-login: true`, any existing session for the same username is expired before the new token is written.
+
+The **GET /auth/online** endpoint (requires admin role) calls this service to return a paginated list of all currently online users.
+
+---
+
+## Serialization
+
+Redis serialization is configured in `RedisConfig.java`:
+
+- **Keys** are serialized with a custom `StringRedisSerializer` that strips surrounding quotes from the JSON string representation, giving clean, human-readable key names.
+- **Values** are serialized with `FastJsonRedisSerializer<Object>`, which uses Alibaba FastJSON with `WriteClassName` enabled so that concrete types can be correctly deserialized.
+- The default cache TTL applied by `RedisCacheConfiguration` (used for `@Cacheable` annotations) is **2 hours**.
+
+FastJSON's global parser whitelist is configured to accept the following packages, preventing unauthorized deserialization:
+
+```
+com.javabs.domain
+com.javabs.service.dto
+com.javabs.modules.system.domain
+com.javabs.modules.security.service.dto
+com.javabs.modules.system.service.dto
+```
+
+---
+
+## Cache Key Generation
+
+When using Spring's `@Cacheable` abstraction, the cache key is generated by hashing a JSON map of the target class, method name, package, and all parameters using **SHA-256**. This ensures unique, collision-resistant keys regardless of parameter types.
+
+---
+
+## Error Handling
+
+Redis errors are handled gracefully in `RedisConfig`. If a cache operation (`get`, `put`, `evict`, or `clear`) throws a `RuntimeException`, the error is logged but the application continues — the operation falls back to the underlying data source rather than propagating an exception to the caller.
+
+---
+
+<Tip>
+  For production deployments, always set a Redis password via the `REDIS_PWD` environment variable. If your Redis server is on a remote host, enable TLS by configuring `spring.redis.ssl: true` and pointing `REDIS_HOST` at the secured endpoint. For high-availability setups, consider switching to Redis Sentinel or Redis Cluster by replacing the `spring.redis.*` block with `spring.redis.sentinel.*` or `spring.redis.cluster.*` accordingly.
+</Tip>

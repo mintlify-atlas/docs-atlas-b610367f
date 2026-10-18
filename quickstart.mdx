@@ -1,47 +1,186 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with the Library Reservation System"
+sidebarTitle: "Quickstart"
+description: "Set up and run the Library Reservation System locally with MySQL and Redis in under 10 minutes. Covers build, config, first login, and first reservation."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through cloning the project, wiring up MySQL and Redis, building the JAR, and making your first authenticated API call — all in under ten minutes.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Install Prerequisites">
+    Make sure the following are installed and accessible on your `PATH` before continuing:
+
+    | Tool | Minimum version |
+    |------|----------------|
+    | Java (JDK) | 8 |
+    | Maven | 3.6 |
+    | MySQL | 5.7 |
+    | Redis | 5 |
+
+    Clone the repository:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/lycoris9029/Library-Reservation-System.git
+    cd Library-Reservation-System
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Create the Database">
+    Connect to your MySQL instance and create the application database with the required character set:
+
+    ```sql
+    CREATE DATABASE `library-face` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    ```
+
+    The database name `library-face` matches the default value used in the datasource configuration. If you choose a different name, set the `DB_NAME` environment variable in the next step.
+  </Step>
+
+  <Step title="Configure the Application">
+    The active configuration file is located at:
+
+    ```
+    library-system/src/main/resources/config/application-dev.yml
+    ```
+
+    The server port is set in `application.yml` and defaults to **8000**. All sensitive values are read from environment variables with safe defaults provided for local development.
+
+    **Datasource (Druid / MySQL)**
+
+    ```yaml
+    spring:
+      datasource:
+        druid:
+          url: jdbc:log4jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:library-face}?serverTimezone=Asia/Shanghai&characterEncoding=utf8&useSSL=false
+          username: ${DB_USER:root}
+          password: ${DB_PWD:}
+    ```
+
+    | Environment variable | Default | Description |
+    |----------------------|---------|-------------|
+    | `DB_HOST` | `localhost` | MySQL host |
+    | `DB_PORT` | `3306` | MySQL port |
+    | `DB_NAME` | `library-face` | Database name |
+    | `DB_USER` | `root` | Database username |
+    | `DB_PWD` | *(empty)* | Database password |
+
+    **Redis**
+
+    ```yaml
+    spring:
+      redis:
+        host: ${REDIS_HOST:127.0.0.1}
+        port: ${REDIS_PORT:6379}
+        database: ${REDIS_DB:0}
+        password: ${REDIS_PWD:}
+        timeout: 5000
+    ```
+
+    | Environment variable | Default | Description |
+    |----------------------|---------|-------------|
+    | `REDIS_HOST` | `127.0.0.1` | Redis host |
+    | `REDIS_PORT` | `6379` | Redis port |
+    | `REDIS_DB` | `0` | Redis database index |
+
+    Export any variables that differ from the defaults before building, for example:
 
     ```bash
-    your-cli init
+    export DB_PWD=mysecretpassword
+    export REDIS_HOST=redis.internal
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Build and Run">
+    From the repository root, build all modules and package the executable JAR:
 
     ```bash
-    your-cli start
+    mvn clean package -DskipTests
     ```
+
+    Then start the application:
+
+    ```bash
+    java -jar library-system/target/library-*.jar
+    ```
+
+    When startup is complete you will see Spring Boot's banner in the console and the server will begin accepting connections on port **8000**. You can verify the service is up by visiting `http://localhost:8000/` — it returns the plain-text message `Backend service started successfully`.
+  </Step>
+
+  <Step title="Fetch a CAPTCHA">
+    Every login attempt requires a CAPTCHA code. Request one from the auth endpoint:
+
+    ```bash
+    curl http://localhost:8000/auth/code
+    ```
+
+    The response is a JSON object with two fields:
+
+    ```json
+    {
+      "img": "data:image/png;base64,iVBORw0KGgo...",
+      "uuid": "a1b2c3d4-e5f6-..."
+    }
+    ```
+
+    | Field | Description |
+    |-------|-------------|
+    | `img` | Base64-encoded PNG of the arithmetic CAPTCHA image |
+    | `uuid` | Identifier that ties this CAPTCHA to the subsequent login request |
+
+    Decode and display the `img` value in a browser or image viewer to read the answer. The code is valid for **2 minutes** (configurable via `login.login-code.expiration`).
+  </Step>
+
+  <Step title="Log In">
+    The login endpoint is `POST /auth/login`. Before sending, the password **must be RSA-encrypted** with the server's public key (found in `application.yml` under `rsa.private_key` — use the corresponding public key from the same key pair). This mirrors what a frontend application would do in the browser before submitting the login form.
+
+    **Request body**
+
+    ```json
+    {
+      "username": "admin",
+      "password": "<RSA-encrypted password>",
+      "code": "<CAPTCHA answer>",
+      "uuid": "<uuid from /auth/code>"
+    }
+    ```
+
+    | Field | Description |
+    |-------|-------------|
+    | `username` | The account username |
+    | `password` | The user's password, RSA-encrypted with the public key |
+    | `code` | The plaintext answer to the CAPTCHA |
+    | `uuid` | The UUID returned by `GET /auth/code` |
+
+    **Response shape**
+
+    ```json
+    {
+      "token": "Bearer eyJhbGciOiJIUzUxMiJ9...",
+      "user": {
+        "id": 1,
+        "username": "admin",
+        "nickName": "Administrator",
+        "roles": ["ADMIN"],
+        ...
+      }
+    }
+    ```
+
+    Copy the full value of the `token` field (including the `Bearer ` prefix) for use in subsequent requests.
+  </Step>
+
+  <Step title="Make an Authenticated Request">
+    Pass the token in the `Authorization` header. For example, list all library rooms:
+
+    ```bash
+    curl -H "Authorization: Bearer <token>" http://localhost:8000/api/libraryRoom
+    ```
+
+    Replace `<token>` with the token string returned by the login response (without the `Bearer ` prefix if you add the prefix yourself, or include it as-is if copying the full token value).
+
+    A successful response returns a paginated list of room objects. From here you can explore all other protected endpoints — reservations, seats, violations, user management, and more.
+
+    <Note>
+      The interactive Swagger UI is available at [http://localhost:8000/doc.html](http://localhost:8000/doc.html) when `swagger.enabled=true` in `application-dev.yml` (enabled by default). It documents every endpoint, shows request/response schemas, and lets you authorize with your Bearer token to try calls directly in the browser — the fastest way to explore the full API surface.
+    </Note>
   </Step>
 </Steps>
-
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>

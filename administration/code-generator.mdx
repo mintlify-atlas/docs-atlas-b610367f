@@ -1,0 +1,208 @@
+---
+title: "CRUD Code Generator for New Modules"
+sidebarTitle: "Code Generator"
+description: "Use the built-in code generator to scaffold Spring Boot controllers, services, repositories, DTOs, and frontend templates from a database table definition."
+---
+
+The `library-generator` module provides a FreeMarker-based code scaffold tool that reads database table column information and generates a complete CRUD stack — reducing the time needed to add a new module from hours to minutes. It introspects your database's `information_schema`, combines it with your per-column configuration, and renders a full set of backend and frontend files.
+
+---
+
+## What Gets Generated
+
+For each configured table, the generator produces the following files:
+
+**Backend (Spring Boot)**
+
+| Artifact | Description |
+|----------|-------------|
+| `Controller` | REST endpoints with standard CRUD operations |
+| `Service` | Service interface |
+| `ServiceImpl` | Service implementation |
+| `Repository` | Spring Data JPA repository |
+| `Entity` | JPA entity mapped to the database table |
+| `Dto` | Data Transfer Object for API responses |
+| `QueryCriteria` | Query criteria class for filtered list endpoints |
+| `Mapper` | MapStruct mapper between Entity and Dto |
+
+**Frontend (Vue)**
+
+| Artifact | Description |
+|----------|-------------|
+| API file | Axios-based API calls for each CRUD operation |
+| `index` page | Vue list/form page wired to the generated API |
+
+---
+
+## Generator Configuration
+
+Before generating code, each table needs a `GenConfig` record that describes where and how the code should be written. These are managed via `GET /api/genConfig/{tableName}` and `PUT /api/genConfig`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tableName` | `String` | ✅ | The database table to generate code for |
+| `apiAlias` | `String` | | Human-readable API name shown in Swagger |
+| `pack` | `String` | ✅ | Java base package path (e.g. `com.javabs.modules.library`) |
+| `moduleName` | `String` | ✅ | Module name used to form sub-package paths |
+| `path` | `String` | ✅ | Absolute filesystem path for frontend file output |
+| `apiPath` | `String` | | Absolute filesystem path for the frontend API file output |
+| `author` | `String` | | Author name written into file headers |
+| `prefix` | `String` | | Table name prefix to strip when forming class names |
+| `cover` | `Boolean` | | Whether to overwrite existing files (defaults to `false`) |
+
+---
+
+## Enabling the Generator
+
+The generator's write-to-disk mode is gated by a feature flag in your application configuration:
+
+```yaml
+# application-dev.yml
+generator:
+  enabled: true
+```
+
+```yaml
+# application-prod.yml
+generator:
+  enabled: false
+```
+
+When `generator.enabled` is `false`, calling the generate endpoint with `type=0` (write to disk) throws a `BadRequestException`. Preview (`type=1`) and download as ZIP (`type=2`) are always available regardless of this flag.
+
+<Warning>
+Set `generator.enabled: false` in production. Leaving it enabled on a production server allows anyone with API access to write arbitrary files to the server's filesystem — a significant security risk.
+</Warning>
+
+---
+
+## Generation Workflow
+
+<Steps>
+  <Step title="Configure the Generator">
+    Fetch the current config for your target table and update it with your package name, module name, author, and output paths.
+
+    ```http
+    GET /api/genConfig/{tableName}
+    ```
+
+    Then persist your changes:
+
+    ```http
+    PUT /api/genConfig
+    Content-Type: application/json
+
+    {
+      "tableName": "library_room",
+      "pack": "com.javabs.modules.library",
+      "moduleName": "library",
+      "path": "/opt/app/frontend/src/views/library/room",
+      "apiPath": "/opt/app/frontend/src/api",
+      "author": "YourName",
+      "prefix": "library_",
+      "cover": false
+    }
+    ```
+  </Step>
+
+  <Step title="Sync Column Info">
+    The generator reads `information_schema` to discover the columns of your target table. Trigger a sync to populate (or refresh) the `ColumnInfo` records stored in `code_column_config`:
+
+    ```http
+    POST /api/generator/sync
+    Content-Type: application/json
+
+    ["library_room"]
+    ```
+
+    You can also list all tables in the database to find the one you want:
+
+    ```http
+    GET /api/generator/tables?name=library&page=0&size=10
+    ```
+  </Step>
+
+  <Step title="Customize Column Metadata">
+    Retrieve the synced columns for your table and annotate each one — mark which fields appear in list views, which appear in forms, whether they are required, and what query strategy to use:
+
+    ```http
+    GET /api/generator/columns?tableName=library_room
+    ```
+
+    Update the column records with your customizations:
+
+    ```http
+    PUT /api/generator
+    Content-Type: application/json
+
+    [
+      {
+        "id": 1,
+        "tableName": "library_room",
+        "columnName": "room_name",
+        "columnType": "varchar",
+        "remark": "Reading Room Name",
+        "notNull": true,
+        "listShow": true,
+        "formShow": true,
+        "formType": "Input",
+        "queryType": "1"
+      }
+    ]
+    ```
+  </Step>
+
+  <Step title="Generate">
+    Call the generate endpoint to write the scaffolded files to the configured output paths on the server filesystem:
+
+    ```http
+    POST /api/generator/{tableName}/{type}
+    ```
+
+    The `type` path variable controls the output mode:
+
+    | `type` | Behaviour |
+    |--------|-----------|
+    | `0` | Write files directly to the server filesystem (requires `generator.enabled: true`) |
+    | `1` | Return a preview of all generated file contents in the response body |
+    | `2` | Download all generated files as a ZIP archive |
+
+    **Example — preview before committing:**
+
+    ```http
+    POST /api/generator/library_room/1
+    ```
+
+    **Example — write to disk:**
+
+    ```http
+    POST /api/generator/library_room/0
+    ```
+  </Step>
+</Steps>
+
+<Note>
+The generator writes files directly to the server's filesystem at the paths configured in `GenConfig`. Ensure those directories are writable by the process running the application, and always review generated code before committing it to version control. The generated files are a starting point — business-specific validation, relationships, and security annotations should be added manually.
+</Note>
+
+---
+
+## ColumnInfo Fields Reference
+
+Each row in `code_column_config` describes one database column and drives how the generator renders form and list components:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tableName` | `String` | The parent database table name |
+| `columnName` | `String` | Database column name |
+| `columnType` | `String` | Database column type (e.g. `varchar`, `bigint`, `datetime`) |
+| `keyType` | `String` | Database key type (e.g. `PRI` for primary key) |
+| `extra` | `String` | Extra column attributes (e.g. `auto_increment`) |
+| `remark` | `String` | Column comment / label used in generated UI |
+| `notNull` | `Boolean` | Whether the field is required in generated forms |
+| `listShow` | `Boolean` | Whether the column appears as a table column in the list view |
+| `formShow` | `Boolean` | Whether the column appears as an input in create/edit forms |
+| `formType` | `String` | UI component type for the form field (e.g. `Input`, `Select`, `DatePicker`) |
+| `queryType` | `String` | Query strategy: `1` = fuzzy/LIKE match, `2` = exact/equal match |
+| `dictName` | `String` | Name of the data dictionary to use for dropdown options |
+| `dateAnnotation` | `String` | Date format annotation applied to the generated entity field |

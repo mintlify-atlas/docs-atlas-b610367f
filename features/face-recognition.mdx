@@ -1,0 +1,92 @@
+---
+title: "Face Recognition Check-In and Check-Out"
+sidebarTitle: "Face Recognition"
+description: "How the Library Reservation System uses the Baidu AI Face Match API to verify patron identity at check-in and check-out. Setup, flow, and confidence threshold."
+---
+
+Biometric verification prevents proxy reservations — a patron cannot check in or check out on behalf of someone else. At both touchpoints the system compares a **live photo uploaded by the patron** against their **registered avatar** on file, using the Baidu AI Face Match API. Only when the two images are confirmed to belong to the same person does the operation proceed.
+
+---
+
+## How It Works
+
+1. **Patron uploads a photo** via multipart form (field name `file`) to one of two endpoints:
+   - `POST /api/libraryYuyue/dao` — check-in (sets reservation `status = 1` and records `startTime`)
+   - `POST /api/libraryYuyue/tui` — check-out (sets reservation `status = 3` and records `endTime`)
+
+2. **System retrieves the patron's stored avatar path** from the `avatarPath` field on their user profile. This is the baseline image registered when the patron enrolled.
+
+3. **If no avatar is on file**, the request is rejected immediately with a message asking the patron to visit their profile and upload a photo before proceeding.
+
+4. **Both images are base64-encoded** and sent as a two-element JSON array to the Baidu AI face match endpoint:
+
+   ```
+   POST https://aip.baidubce.com/rest/2.0/face/v3/match
+   ```
+
+   Each element carries `image` (base64 string) and `"image_type": "BASE64"`. An OAuth 2.0 access token obtained from `https://aip.baidubce.com/oauth/2.0/token` is passed as a query parameter.
+
+5. **If the returned `score` is ≥ 80**, identity is confirmed and the lifecycle transition completes. **If the score is < 80**, the request is rejected — the patron is told they cannot check in (or check out) because the faces do not match.
+
+---
+
+## Supported Image Formats
+
+The file extension of the uploaded image is validated before any further processing. Only the following formats are accepted:
+
+- `gif`
+- `jpg`
+- `png`
+- `jpeg`
+
+Uploading any other file type raises a `BadRequestException` with the message *"文件格式错误！, 仅支持 gif jpg png jpeg 格式"*.
+
+---
+
+## Confidence Threshold
+
+<Note>
+  A score of **80** is Baidu AI's recommended threshold for high-confidence face matches. Values above 80 indicate a very high probability that both images show the same person. If your deployment environment requires stricter identity assurance (e.g. a high-security facility) or needs to be more lenient (e.g. lower-quality camera hardware), adjust the comparison in `LibraryYuyueController`:
+
+  ```java
+  // Check-in (dao) and check-out (tui) both contain this guard:
+  if (score < 80) {
+      return new ResponseEntity<>("不是用户本人，无法签到", HttpStatus.CREATED);
+  }
+  ```
+
+  Change `80` to the value that best suits your operational requirements.
+</Note>
+
+---
+
+## Registering an Avatar
+
+Before a patron can check in or check out for the first time, they must register a reference photo:
+
+- Upload a clear, well-lit face photo via `POST /api/users/updateAvatar`.
+- The image is saved to the server filesystem and its path is persisted to `User.avatarPath`.
+- This stored path is what the face-match logic reads as the baseline image at every check-in and check-out.
+
+Patrons who have not uploaded an avatar will be blocked at the face-verification step with a message prompting them to complete their profile.
+
+---
+
+## API Credentials Configuration
+
+The Baidu AI credentials are currently stored as static fields in `AccessToken.java`:
+
+```java
+private static String client_id     = "atsck4POS3FrXcrajxNrOXmp";
+private static String client_secret = "KCkqTj62LPuqQ0PXKqa6UaN6d0s2sjOf";
+```
+
+<Warning>
+  **These are placeholder credentials from the original developer's Baidu AI account.** Before deploying to any environment, you must:
+
+  1. Register your own application at the [Baidu AI Console](https://console.bce.baidu.com/) and obtain a fresh `client_id` and `client_secret`.
+  2. Remove the hardcoded values from `AccessToken.java`.
+  3. Move the credentials to environment variables (e.g. `BAIDU_CLIENT_ID` and `BAIDU_CLIENT_SECRET`) and read them at runtime via `System.getenv()` or a Spring `@Value` binding.
+
+  Shipping API secrets in source code exposes them to anyone with access to the repository and may result in unauthorized usage charges or account suspension.
+</Warning>

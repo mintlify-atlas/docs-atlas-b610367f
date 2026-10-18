@@ -1,0 +1,132 @@
+---
+title: "Seat Reservation Workflow: Book, Check In, and Check Out"
+sidebarTitle: "Reservations"
+description: "How patrons reserve library seats, check in with face recognition, mark temporary absence, and check out — with the full lifecycle status model."
+---
+
+The reservation module (`library_yuyue`) manages the complete lifecycle of a patron's seat booking through the `/api/libraryYuyue` endpoint family. From the moment a patron selects a seat to the moment they leave the library, every state transition is recorded, and biometric face verification is required at both check-in and check-out to prevent proxy reservations.
+
+---
+
+## Reservation Status Model
+
+Each reservation record carries an integer `status` field that reflects exactly where a patron is in their visit.
+
+| Status | Value | Meaning |
+|--------|-------|---------|
+| Pending check-in | `0` | Reserved but the patron has not yet arrived at the library |
+| Checked in | `1` | Patron arrived and was verified via face recognition; `startTime` is set |
+| Temporarily absent | `2` | Patron stepped away from the seat; the seat is still held |
+| Checked out | `3` | Patron left the library; `endTime` is set and the seat is released |
+
+---
+
+## Lifecycle Flow
+
+<Steps>
+  <Step title="Reserve a Seat">
+    **Endpoint:** `POST /api/libraryYuyue`
+
+    **Required permission:** `librarySeat:yuyue`
+
+    The patron submits a JSON body containing the target `seatId`. The controller performs several automatic actions:
+
+    - Validates the patron's credit score. If `User.num < 0`, the request is rejected with HTTP 201 and the message *"信誉分不足，无法预约"* (insufficient credit score).
+    - Looks up the seat by `seatId` and copies `card` → `seatName` and `roomName` onto the new reservation.
+    - Sets `status = 0` (pending check-in).
+    - Records the current user's id and username from the security context.
+    - Updates the target seat's `status` to `2` (occupied) so no other patron can book it.
+
+    ```json
+    {
+      "seatId": 12
+    }
+    ```
+  </Step>
+
+  <Step title="Check In">
+    **Endpoint:** `POST /api/libraryYuyue/dao`  (multipart form)
+
+    **Parameters:** `file` (image), `id` (reservation id), `status` (pass `1`)
+
+    The patron uploads a live photo at the library terminal. The system:
+
+    1. Validates the file extension — only `gif`, `jpg`, `png`, and `jpeg` are accepted.
+    2. Saves the uploaded file to the server's avatar storage path.
+    3. Retrieves the patron's registered `avatarPath` from their user profile. If no avatar has been registered, the request is rejected asking the patron to upload one first.
+    4. Base64-encodes both images and calls the Baidu AI Face Match API.
+    5. If the returned confidence score is **≥ 80**, identity is confirmed; the reservation `status` is set to `1` and `startTime` is recorded with the current timestamp.
+    6. If the score is **< 80**, the request is rejected: the patron is told they cannot check in.
+  </Step>
+
+  <Step title="Mark as Temporarily Absent">
+    **Endpoint:** `POST /api/libraryYuyue/li`
+
+    **Body:** `{ "id": <reservationId>, "status": 2 }`
+
+    No face verification is required for a temporary absence. The controller calls the service's `update` method directly and returns HTTP 201. The seat remains marked as occupied (`status = 2`) while the patron is away, preventing anyone else from booking it.
+  </Step>
+
+  <Step title="Check Out">
+    **Endpoint:** `POST /api/libraryYuyue/tui`  (multipart form)
+
+    **Parameters:** `file` (image), `id` (reservation id), `status` (pass `3`)
+
+    Check-out mirrors check-in biometrically. The system:
+
+    1. Validates the uploaded image file extension (`gif`, `jpg`, `png`, `jpeg`).
+    2. Retrieves and verifies the patron's registered avatar against the uploaded photo using Baidu AI Face Match (score must be **≥ 80**).
+    3. Sets reservation `status = 3` and records `endTime` with the current timestamp.
+    4. Releases the seat by updating its `status` back to `1` (available), making it bookable for other patrons.
+  </Step>
+</Steps>
+
+---
+
+## Credit Score Gate
+
+Every user account holds a `num` field representing their credit score (starting at 100). If a patron accumulates violations that reduce `num` to below `0`, the `POST /api/libraryYuyue` endpoint immediately returns HTTP 201 with an error message and does not create the reservation. Patrons must resolve their standing before being allowed to book again.
+
+See [Violations](/features/violations) for how credit score deductions are applied.
+
+---
+
+## Reservation Fields
+
+The `library_yuyue` table stores the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Auto-generated primary key |
+| `userId` | Long | ID of the reserving patron |
+| `userName` | String | Username of the reserving patron |
+| `roomName` | String | Name of the reading room (copied from seat) |
+| `seatId` | Integer | Foreign key to the reserved seat |
+| `seatName` | String | Seat label / card number (copied from seat) |
+| `status` | Integer | Current lifecycle status (0–3, see table above) |
+| `yyTime` | Timestamp | Reservation creation time (auto-set via `@CreationTimestamp`) |
+| `startTime` | Timestamp | Check-in time (set on successful face verification at check-in) |
+| `endTime` | Timestamp | Check-out time (set on successful face verification at check-out) |
+
+---
+
+## Scoped Visibility
+
+The `GET /api/libraryYuyue` query endpoint automatically scopes results to the currently authenticated user:
+
+```java
+criteria.setUserId(SecurityUtils.getCurrentUserId());
+```
+
+Patrons can only see their own reservation history — they cannot view records belonging to other users.
+
+---
+
+## Required Permissions
+
+| Permission | Grants Access To |
+|------------|-----------------|
+| `librarySeat:yuyue` | Create a new reservation (`POST /api/libraryYuyue`) |
+| `libraryYuyue:list` | View reservations and download Excel export |
+| `libraryYuyue:edit` | Modify an existing reservation record |
+| `libraryYuyue:del` | Delete reservation records |

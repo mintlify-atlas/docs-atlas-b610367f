@@ -1,0 +1,159 @@
+---
+title: "Environment Variables and Application Configuration"
+sidebarTitle: "Environment"
+description: "All environment variables and application.yml settings for the Library Reservation System — database, file storage, server port, and Swagger UI."
+---
+
+The Library Reservation System is configured via two YAML files:
+
+- **`application.yml`** — global settings applied across all environments (server port, JPA, Redis, task pool, RSA, etc.)
+- **`application-dev.yml`** — development-profile settings (database connection, JWT, login, file paths, Swagger)
+
+The active profile is controlled by the `spring.profiles.active` property in `application.yml`, which defaults to `dev`:
+
+```yaml
+spring:
+  profiles:
+    active: dev
+```
+
+To switch profiles, change this value or pass `--spring.profiles.active=<profile>` at startup.
+
+---
+
+## Database
+
+Configured in `application-dev.yml` using the Druid connection pool. All values are read from environment variables with fallback defaults.
+
+| Variable   | Default        | Description                                     |
+|------------|----------------|-------------------------------------------------|
+| `DB_HOST`  | `localhost`    | MySQL server hostname or IP address             |
+| `DB_PORT`  | `3306`         | MySQL server port                               |
+| `DB_NAME`  | `library-face` | Target database name                            |
+| `DB_USER`  | `root`         | Database login username                         |
+| `DB_PWD`   | *(none)*       | Database login password — always set explicitly |
+
+The JDBC URL is assembled as:
+
+```
+jdbc:log4jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:library-face}
+  ?serverTimezone=Asia/Shanghai&characterEncoding=utf8&useSSL=false
+```
+
+Druid pool settings (fixed in `application-dev.yml`):
+
+| Setting                          | Value   |
+|----------------------------------|---------|
+| `initial-size`                   | 5       |
+| `min-idle`                       | 15      |
+| `max-active`                     | 30      |
+| `max-wait`                       | 3000 ms |
+| `remove-abandoned-timeout`       | 180 s   |
+| `time-between-eviction-runs-millis` | 60000 ms |
+| `test-while-idle`                | `true`  |
+| `test-on-borrow`                 | `true`  |
+
+---
+
+## Redis
+
+Configured in `application.yml`. See [Redis Configuration](/configuration/redis) for full details on how Redis is used at runtime.
+
+| Variable     | Default       | Description                                         |
+|--------------|---------------|-----------------------------------------------------|
+| `REDIS_HOST` | `127.0.0.1`   | Redis server hostname or IP address                 |
+| `REDIS_PORT` | `6379`        | Redis server port                                   |
+| `REDIS_DB`   | `0`           | Redis logical database index                        |
+| `REDIS_PWD`  | *(empty)*     | Redis password — set for any non-local Redis server |
+
+---
+
+## Server
+
+The HTTP server listens on a fixed port defined in `application.yml`:
+
+```yaml
+server:
+  port: 8000
+```
+
+To change the port, edit this value directly in `application.yml` (or override it with the `SERVER_PORT` Spring Boot standard environment variable).
+
+---
+
+## JPA / Hibernate
+
+JPA is configured in `application.yml`. The schema must be created manually — Hibernate will **not** attempt to create or alter tables on startup.
+
+| Setting                        | Value                                        | Notes                                         |
+|--------------------------------|----------------------------------------------|-----------------------------------------------|
+| `spring.jpa.hibernate.ddl-auto` | `none`                                      | Schema management is handled outside the app  |
+| `spring.jpa.properties.hibernate.dialect` | `org.hibernate.dialect.MySQL5InnoDBDialect` | InnoDB engine, MySQL 5.x compatibility |
+| `spring.jpa.open-in-view`      | `true`                                       | Keeps the Hibernate session open through the HTTP request lifecycle |
+
+---
+
+## File Storage
+
+File upload paths are configured in `application-dev.yml` under the `file` key. The `FileProperties` bean selects the correct path block (`windows`, `mac`, or `linux`) based on the OS at runtime.
+
+| Key                      | Value                   | Description                              |
+|--------------------------|-------------------------|------------------------------------------|
+| `file.windows.path`      | `C:\eladmin\file\`      | Upload destination on Windows            |
+| `file.windows.avatar`    | `C:\eladmin\avatar\`    | Avatar upload destination on Windows     |
+| `file.maxSize`           | `100`                   | Maximum general upload size in MB        |
+| `file.avatarMaxSize`     | `5`                     | Maximum avatar upload size in MB         |
+
+<Note>
+  Linux and macOS path equivalents (`file.linux.*` and `file.mac.*`) are not set in `application-dev.yml`. Add them when deploying on non-Windows hosts.
+</Note>
+
+---
+
+## Code Generator
+
+```yaml
+generator:
+  enabled: true
+```
+
+Set `generator.enabled: false` in any production profile. Leaving the code generator enabled in production is a security risk.
+
+---
+
+## Swagger / Knife4j
+
+```yaml
+swagger:
+  enabled: true
+```
+
+When enabled, the Knife4j UI is available at:
+
+```
+http://localhost:8000/doc.html
+```
+
+Set `swagger.enabled: false` before deploying to production to prevent API schema exposure.
+
+---
+
+## Async Thread Pool
+
+The application configures a shared `TaskExecutor` via the `task.pool` namespace in `application.yml`:
+
+```yaml
+task:
+  pool:
+    core-pool-size: 10
+    max-pool-size: 30
+    keep-alive-seconds: 60
+    queue-capacity: 50
+```
+
+| Property              | Value | Description                                              |
+|-----------------------|-------|----------------------------------------------------------|
+| `core-pool-size`      | 10    | Number of threads kept alive even when idle              |
+| `max-pool-size`       | 30    | Maximum concurrent threads under load                    |
+| `keep-alive-seconds`  | 60    | Idle time before threads above `core-pool-size` are terminated |
+| `queue-capacity`      | 50    | Task queue depth before new threads beyond core are spawned |

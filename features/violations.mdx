@@ -1,0 +1,129 @@
+---
+title: "Violation Reporting and Credit Score Deductions"
+sidebarTitle: "Violations"
+description: "How users report rule violations against other patrons, and how administrators review reports and deduct credit scores to enforce library policies."
+---
+
+The violation system (`library_volation`) lets patrons formally report misbehavior by other library users. Once a report is submitted, an administrator reviews it and optionally deducts credit score points from the offending patron's account. If a patron's credit score falls below zero, they are blocked from making new seat reservations until their standing is restored.
+
+---
+
+## Violation Entity Fields
+
+Violation records are stored in the `library_volation` table:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Auto-generated primary key |
+| `sendId` | Long | User ID of the patron who submitted the report (auto-set from the security context) |
+| `sendName` | String | Username of the reporter (auto-set from the security context) |
+| `receiveId` | Long | User ID of the patron being reported (supplied by the reporter) |
+| `receiveName` | String | Display name of the reported patron (auto-resolved from `receiveId`) |
+| `sendTime` | Timestamp | Report submission timestamp (auto-set via `@CreationTimestamp`) |
+| `status` | Integer | Current review status (see table below) |
+| `num` | Integer | Number of credit score points to deduct; starts at `0` and is set by the administrator at processing time |
+| `remark` | String | Free-text description of the alleged violation |
+
+### Violation Status Values
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Pending review — newly submitted, awaiting administrator attention |
+| `1` | Under investigation — an administrator has opened the case |
+| `2` | Dismissed — the report was reviewed and no deduction will be applied |
+| `3` | Upheld and processed — the violation was confirmed and `num` points were deducted |
+
+---
+
+## Workflow
+
+<Steps>
+  <Step title="Patron Submits a Violation Report">
+    **Endpoint:** `POST /api/libraryVolation`
+
+    **Required permission:** `libraryVolation:add`
+
+    The reporting patron submits a JSON body with the `receiveId` of the offender and a `remark` describing the incident. The system automatically:
+
+    - Sets `sendId` and `sendName` from the current authenticated user (via `SecurityUtils`).
+    - Looks up the offender's display name by `receiveId` and stores it as `receiveName`.
+    - Sets `status = 0` (pending review).
+    - Sets `num = 0` (no deduction yet).
+    - Records `sendTime` automatically via `@CreationTimestamp`.
+
+    ```json
+    {
+      "receiveId": 42,
+      "remark": "Patron was speaking loudly on a phone call in the silent study zone."
+    }
+    ```
+  </Step>
+
+  <Step title="Administrator Reviews the Report">
+    **Endpoint:** `PUT /api/libraryVolation`
+
+    **Required permission:** `libraryVolation:edit`
+
+    The administrator opens the case and updates the status to indicate the review outcome:
+
+    - Set `status = 1` to mark the report as **under investigation**.
+    - Set `status = 2` to **dismiss** the report (no deduction will be applied).
+
+    ```json
+    {
+      "id": 15,
+      "receiveId": 42,
+      "status": 1
+    }
+    ```
+  </Step>
+
+  <Step title="Administrator Processes the Violation">
+    **Endpoint:** `POST /api/libraryVolation/chuli`
+
+    **Required permission:** `libraryVolation:chuli`
+
+    Once the investigation is complete, the administrator submits a final decision with the number of credit score points to deduct:
+
+    ```json
+    {
+      "id": 15,
+      "status": 3,
+      "num": 10
+    }
+    ```
+
+    The controller enforces the following rules:
+
+    - If `status = 2` (dismissed), `num` is **forced to `0`** regardless of what was submitted.
+    - The violation record is updated with the final `status` and `num`.
+    - The offender's credit score is reduced: `User.num = User.num - num`.
+
+    A successful response returns HTTP 200.
+  </Step>
+</Steps>
+
+---
+
+## Credit Score System
+
+Every user account starts with a credit score of **100 points** (`User.num = 100`). Points are deducted when violations against them are upheld. The credit score affects reservation eligibility:
+
+- If `User.num ≥ 0` → the patron can make new seat reservations.
+- If `User.num < 0` → new reservation attempts are blocked with an error response.
+
+<Warning>
+  Credit score deductions are **irreversible**. The system does not provide a restore or refund endpoint for deducted points. Before processing a violation with a non-zero deduction, ensure the decision is final.
+</Warning>
+
+---
+
+## Required Permissions
+
+| Permission | Grants Access To |
+|------------|-----------------|
+| `libraryVolation:list` | View violation reports and download Excel export |
+| `libraryVolation:add` | Submit a new violation report |
+| `libraryVolation:edit` | Update a violation record (e.g. change status during review) |
+| `libraryVolation:del` | Delete violation records |
+| `libraryVolation:chuli` | Process a violation and apply credit score deductions |

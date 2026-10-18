@@ -1,0 +1,155 @@
+---
+title: "Authentication API: Login, Captcha, and Token Management"
+sidebarTitle: "Authentication"
+description: "REST endpoints for obtaining a CAPTCHA, logging in with JWT, retrieving current user info, and logging out. All other APIs require the returned Bearer token."
+---
+
+The Library Reservation System uses **JWT Bearer tokens** for authentication. Before logging in, you must first obtain a CAPTCHA challenge. Submit your credentials along with the CAPTCHA answer to `POST /auth/login` to receive your token. All subsequent requests to protected endpoints must include the header `Authorization: Bearer <token>`.
+
+---
+
+## GET /auth/code — Get CAPTCHA
+
+Retrieve an arithmetic CAPTCHA image and its associated UUID. No authentication is required. The CAPTCHA expires after a short TTL (configured server-side in Redis); request a fresh one if it expires before you log in.
+
+**Authentication:** None (anonymous)
+
+### Response Fields
+
+<ResponseField name="img" type="string">
+  Base64-encoded PNG image of the arithmetic CAPTCHA. Render this image to the user so they can read the answer.
+</ResponseField>
+
+<ResponseField name="uuid" type="string">
+  UUID that associates this CAPTCHA image with your login attempt. Pass this value as `uuid` in the login request body.
+</ResponseField>
+
+### Example
+
+```bash
+curl http://localhost:8000/auth/code
+```
+
+**Sample response:**
+
+```json
+{
+  "img": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+  "uuid": "code-key-a1b2c3d4e5f6"
+}
+```
+
+---
+
+## POST /auth/login — Login
+
+Exchange credentials and a CAPTCHA answer for a JWT Bearer token. The token is returned with the `"Bearer "` prefix already included and must be forwarded verbatim in the `Authorization` header of all subsequent requests.
+
+**Authentication:** None (anonymous)
+
+<Note>
+  Passwords **must** be RSA-encrypted on the client side using the server's public key before transmission. The server decrypts the payload with the private key configured in `rsa.private_key`. Never send a plaintext password to this endpoint.
+</Note>
+
+### Request Body
+
+<ParamField body="username" type="string" required>
+  The patron's or administrator's username.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's password, **RSA-encrypted** with the server's public key. Sending a plaintext password will result in an authentication failure.
+</ParamField>
+
+<ParamField body="code" type="string" required>
+  The numeric answer read from the CAPTCHA image returned by `GET /auth/code`.
+</ParamField>
+
+<ParamField body="uuid" type="string" required>
+  The UUID returned by `GET /auth/code` that identifies the CAPTCHA session in Redis. The server deletes this key immediately after verifying the code, so each UUID is single-use.
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="token" type="string">
+  The JWT token string, already prefixed with `"Bearer "`. Use this entire value as the `Authorization` header value in subsequent requests.
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  The authenticated user's details as a `JwtUserDto` object, including `id`, `username`, `nickName`, `email`, granted `roles`, and other profile fields.
+</ResponseField>
+
+### Example
+
+```bash
+# Note: the password field must contain the RSA-encrypted ciphertext,
+# shown here as a placeholder.
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "<rsa-encrypted-password>",
+    "code": "12",
+    "uuid": "code-key-abc123"
+  }'
+```
+
+**Sample response:**
+
+```json
+{
+  "token": "Bearer eyJhbGciOiJIUzI1NiJ9...",
+  "user": {
+    "id": 1,
+    "username": "admin",
+    "nickName": "Administrator",
+    "email": "admin@library.local",
+    "roles": ["ADMIN"]
+  }
+}
+```
+
+---
+
+## GET /auth/info — Get Current User
+
+Returns the full details of the currently authenticated user, resolved from the Spring Security context.
+
+**Authentication:** Required — `Authorization: Bearer <token>`
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8000/auth/info
+```
+
+**Sample response:**
+
+```json
+{
+  "id": 1,
+  "username": "admin",
+  "nickName": "Administrator",
+  "email": "admin@library.local",
+  "roles": ["ADMIN"]
+}
+```
+
+---
+
+## DELETE /auth/logout — Logout
+
+Invalidates the current session by removing the online-user record from Redis. The token is extracted from the `Authorization` header by the server; no request body is required.
+
+**Authentication:** Token in `Authorization` header (the server reads it to identify the session to remove).
+
+### Example
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer <token>" \
+  http://localhost:8000/auth/logout
+```
+
+A successful logout returns HTTP `200 OK` with an empty body.

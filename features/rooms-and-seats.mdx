@@ -1,0 +1,96 @@
+---
+title: "Reading Room and Seat Management"
+sidebarTitle: "Rooms & Seats"
+description: "Create and manage library reading rooms and their seats. Track seat availability with three states and export records to Excel."
+---
+
+The physical layout of the library is modelled as a two-level hierarchy: **reading rooms** (`library_room`) contain **seats** (`library_seat`). Rooms are managed via `/api/libraryRoom` and seats via `/api/librarySeat`. Together they provide the inventory that patrons browse when making a reservation.
+
+---
+
+## Reading Rooms
+
+### Room Fields
+
+Reading rooms are simple reference entities that give seats a named location.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Auto-generated primary key |
+| `name` | String | Display name of the reading room |
+| `address` | String | Physical location or floor description |
+
+### Room Endpoints
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/libraryRoom` | `libraryRoom:list` | Paginated list of all reading rooms |
+| `GET` | `/api/libraryRoom/select` | *(none required)* | Full unpaginated list — used to populate dropdowns in the frontend |
+| `GET` | `/api/libraryRoom/download` | `libraryRoom:list` | Download all room records as an Excel file |
+| `POST` | `/api/libraryRoom` | `libraryRoom:add` | Create a new reading room |
+| `PUT` | `/api/libraryRoom` | `libraryRoom:edit` | Update an existing reading room |
+| `DELETE` | `/api/libraryRoom` | `libraryRoom:del` | Delete rooms by array of ids |
+
+The `GET /api/libraryRoom/select` endpoint is unauthenticated by design. It returns the full list of rooms without pagination so that the reservation form can populate a room selection dropdown before a patron picks a seat.
+
+---
+
+## Seats
+
+### Seat Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Auto-generated primary key |
+| `card` | String | Seat number or label (e.g. `"A-01"`) displayed to patrons |
+| `roomId` | Integer | Foreign key linking the seat to its reading room |
+| `roomName` | String | Room name, automatically resolved and stored when the seat is created or updated |
+| `status` | Integer | Current availability state (see table below) |
+
+### Seat Status Values
+
+| Value | Meaning |
+|-------|---------|
+| `1` | Available — the seat can be reserved |
+| `2` | Occupied — a reservation is active on this seat |
+
+When a patron successfully completes a reservation (`POST /api/libraryYuyue`), the system immediately sets the seat's `status` to `2`. When the patron checks out (`POST /api/libraryYuyue/tui`) and face verification passes, the seat's `status` is reset to `1`, making it available for the next patron.
+
+### Seat Endpoints
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/librarySeat` | `librarySeat:list` | Paginated list of seats |
+| `GET` | `/api/librarySeat/download` | `librarySeat:list` | Download all seat records as an Excel file |
+| `POST` | `/api/librarySeat` | `librarySeat:add` | Create a new seat |
+| `PUT` | `/api/librarySeat` | `librarySeat:edit` | Update an existing seat |
+| `DELETE` | `/api/librarySeat` | `librarySeat:del` | Delete seats by array of ids |
+
+### Automatic Room Name Resolution
+
+When a seat is created or updated, the controller automatically looks up the room name and stores it on the seat record:
+
+```java
+// On POST /api/librarySeat
+LibraryRoomDto roomDto = libraryRoomService.findById(resources.getRoomId());
+resources.setRoomName(roomDto.getName());
+resources.setStatus(1);  // All newly created seats start as Available
+```
+
+This means you never need to pass `roomName` in the request body — supply only the `roomId` and the system will fill in the name. The same resolution happens on `PUT /api/librarySeat` so the room name stays in sync if a seat is reassigned.
+
+---
+
+## Required Permissions Summary
+
+| Permission | Grants Access To |
+|------------|-----------------|
+| `libraryRoom:list` | View rooms, download Excel |
+| `libraryRoom:add` | Create a reading room |
+| `libraryRoom:edit` | Update a reading room |
+| `libraryRoom:del` | Delete reading rooms |
+| `librarySeat:list` | View seats, download Excel |
+| `librarySeat:add` | Create a seat |
+| `librarySeat:edit` | Update a seat |
+| `librarySeat:del` | Delete seats |
+| `librarySeat:yuyue` | Reserve a seat (see [Reservations](/features/reservations)) |

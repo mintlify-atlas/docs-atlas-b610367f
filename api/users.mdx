@@ -1,0 +1,439 @@
+---
+title: "Users API: Create and Manage Library System Users"
+sidebarTitle: "Users"
+description: "REST endpoints for user management — list, create, update, delete users, change passwords, upload avatars, and manage account settings. Requires user permissions."
+---
+
+The Users API (`/api/users`) provides full CRUD plus self-service profile operations for the Library Reservation System. Administrators can manage all users via permission-gated endpoints, while any authenticated user can update their own profile, change their password, and upload an avatar without special permissions.
+
+---
+
+## GET /api/users — List Users (paginated)
+
+Returns a paginated, data-scope-filtered list of users. Results are narrowed to departments that fall within the calling user's role `dataScope` setting — a user with "本级" scope only sees users in their own department.
+
+**Required permission:** `user:list`
+
+### Query Parameters
+
+<ParamField query="page" type="integer" default="0">
+  Zero-based page number.
+</ParamField>
+
+<ParamField query="size" type="integer" default="10">
+  Number of results per page.
+</ParamField>
+
+<ParamField query="blurry" type="string">
+  Fuzzy search term matched against `username`, `nickName`, and `email` simultaneously.
+</ParamField>
+
+<ParamField query="deptId" type="long">
+  Filter users by department ID. The query automatically includes all child departments beneath the given ID.
+</ParamField>
+
+<ParamField query="enabled" type="boolean">
+  Filter by account status. `true` returns only active accounts; `false` returns disabled accounts.
+</ParamField>
+
+<ParamField query="createTime" type="array">
+  Timestamp range filter as a two-element array `[start, end]` (ISO-8601 or epoch milliseconds). Returns users created within the given window.
+</ParamField>
+
+### Response
+
+Returns a standard Spring Data page envelope.
+
+<ResponseField name="content" type="array">
+  Array of user objects matching the query.
+
+  <Expandable title="User object fields">
+    <ResponseField name="id" type="long">Unique user ID.</ResponseField>
+    <ResponseField name="username" type="string">Unique login name.</ResponseField>
+    <ResponseField name="nickName" type="string">Display name shown throughout the UI.</ResponseField>
+    <ResponseField name="email" type="string">User's email address.</ResponseField>
+    <ResponseField name="phone" type="string">Contact phone number.</ResponseField>
+    <ResponseField name="gender" type="string">User's gender.</ResponseField>
+    <ResponseField name="enabled" type="boolean">Whether the account is active.</ResponseField>
+    <ResponseField name="num" type="integer">Credit score (0–100). Defaults to 100 on creation.</ResponseField>
+    <ResponseField name="roles" type="array">Array of role objects assigned to this user.</ResponseField>
+    <ResponseField name="avatarName" type="string">Stored filename of the user's avatar image.</ResponseField>
+    <ResponseField name="avatarPath" type="string">Filesystem path to the avatar, used by the face-recognition check-in/check-out module.</ResponseField>
+    <ResponseField name="createTime" type="string">ISO-8601 timestamp of account creation.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalElements" type="long">Total number of users matching the filter.</ResponseField>
+<ResponseField name="totalPages" type="integer">Total number of pages at the requested `size`.</ResponseField>
+<ResponseField name="number" type="integer">Current zero-based page number.</ResponseField>
+<ResponseField name="size" type="integer">Page size used for this response.</ResponseField>
+
+```bash
+curl -G http://localhost:8000/api/users \
+  -H "Authorization: Bearer <token>" \
+  --data-urlencode "blurry=john" \
+  --data-urlencode "enabled=true" \
+  --data-urlencode "page=0" \
+  --data-urlencode "size=20"
+```
+
+---
+
+## GET /api/users/select — List All Users (no pagination)
+
+Returns a flat, unpaginated list of all users. No special permission is required beyond authentication. Intended for use in dropdown selectors — for example, when an administrator needs to assign a violation record to a specific user.
+
+### Query Parameters
+
+Accepts the same filter criteria as `GET /api/users` (`blurry`, `deptId`, `enabled`, `createTime`), but ignores `page` and `size`.
+
+### Response
+
+A JSON array of user objects (same schema as the `content` array above).
+
+```bash
+curl http://localhost:8000/api/users/select \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /api/users/download — Export Users to Excel
+
+Streams an Excel file (.xlsx) containing all users that match the supplied filter criteria. The response `Content-Type` is `application/octet-stream` with a `Content-Disposition: attachment` header.
+
+**Required permission:** `user:list`
+
+### Query Parameters
+
+Same filter criteria as `GET /api/users` (`blurry`, `deptId`, `enabled`, `createTime`). Pagination parameters are ignored — the full result set is exported.
+
+```bash
+curl -G http://localhost:8000/api/users/download \
+  -H "Authorization: Bearer <token>" \
+  --data-urlencode "enabled=true" \
+  -o users_export.xlsx
+```
+
+---
+
+## POST /api/users — Create User
+
+Creates a new user account. The new account's password is automatically set to a BCrypt-encoded `"123456"` regardless of any `password` field in the request body — users should change it on first login. The credit score (`num`) is initialized to `100`.
+
+**Required permission:** `user:add`
+
+<Note>
+  The caller's minimum role level must be less than or equal to the minimum level of all roles being assigned to the new user. Attempting to create a user with a higher-privilege role than your own will return a `400 Bad Request`.
+</Note>
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="username" type="string" required>
+  Unique login name. Must not be blank. Stored in `sys_user.username` with a unique constraint.
+</ParamField>
+
+<ParamField body="nickName" type="string" required>
+  Display name shown in the UI and on reservation records. Must not be blank.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Email address. Must be a valid RFC-5322 format. Must not be blank.
+</ParamField>
+
+<ParamField body="phone" type="string" required>
+  Contact phone number. Must not be blank.
+</ParamField>
+
+<ParamField body="gender" type="string">
+  User's gender (free-form string, e.g. `"男"`, `"女"`).
+</ParamField>
+
+<ParamField body="enabled" type="boolean" required>
+  Whether the account is immediately active. Set `false` to create a disabled account.
+</ParamField>
+
+<ParamField body="roles" type="array">
+  Array of role reference objects. Each element must contain at least an `id` field matching an existing role.
+
+  ```json
+  [{"id": 2}, {"id": 5}]
+  ```
+</ParamField>
+
+### Response
+
+`201 Created` with an empty body on success.
+
+```bash
+# Create a new user
+curl -X POST http://localhost:8000/api/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "jdoe",
+    "nickName": "John Doe",
+    "email": "jdoe@example.com",
+    "phone": "13800138000",
+    "enabled": true,
+    "roles": [{"id": 2}]
+  }'
+```
+
+---
+
+## PUT /api/users — Update User (Admin)
+
+Updates any field of an existing user account. Role-level hierarchy is re-validated on every update — you cannot elevate a user to a role higher than your own.
+
+**Required permission:** `user:edit`
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="id" type="long" required>
+  ID of the user to update. Required for the `Update` validation group.
+</ParamField>
+
+<ParamField body="username" type="string" required>
+  Unique login name.
+</ParamField>
+
+<ParamField body="nickName" type="string" required>
+  Display name.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Valid email address.
+</ParamField>
+
+<ParamField body="phone" type="string" required>
+  Contact phone number.
+</ParamField>
+
+<ParamField body="gender" type="string">
+  User's gender.
+</ParamField>
+
+<ParamField body="enabled" type="boolean" required>
+  Account active status.
+</ParamField>
+
+<ParamField body="roles" type="array">
+  Updated set of role reference objects `[{"id": N}, ...]`.
+</ParamField>
+
+### Response
+
+`204 No Content` on success.
+
+```bash
+curl -X PUT http://localhost:8000/api/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 42,
+    "username": "jdoe",
+    "nickName": "Johnathan Doe",
+    "email": "jdoe@example.com",
+    "phone": "13800138000",
+    "enabled": true,
+    "roles": [{"id": 2}]
+  }'
+```
+
+---
+
+## PUT /api/users/center — Update Own Profile
+
+Allows any authenticated user to update their own profile information. If the `id` in the request body does not match the currently authenticated user's ID, the request is rejected with `400 Bad Request`. Role assignments and elevated administrative fields are ignored — use `PUT /api/users` for those.
+
+**Required permission:** Authenticated only (no special permission).
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="id" type="long" required>
+  Must match the authenticated user's own ID.
+</ParamField>
+
+<ParamField body="nickName" type="string" required>
+  Updated display name.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Updated email address (valid format required).
+</ParamField>
+
+<ParamField body="phone" type="string" required>
+  Updated phone number.
+</ParamField>
+
+<ParamField body="gender" type="string">
+  Updated gender value.
+</ParamField>
+
+### Response
+
+`204 No Content` on success.
+
+```bash
+curl -X PUT http://localhost:8000/api/users/center \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 42,
+    "nickName": "John D.",
+    "email": "john.d@example.com",
+    "phone": "13900139000",
+    "gender": "男"
+  }'
+```
+
+---
+
+## DELETE /api/users — Delete Users
+
+Deletes one or more user accounts by ID. The caller's minimum role level must be lower than or equal to the minimum role level of each target user — you cannot delete a user with higher privileges than your own.
+
+**Required permission:** `user:del`
+
+### Request Body
+
+`Content-Type: application/json`
+
+A JSON array of user IDs (`long`) to delete.
+
+<ParamField body="ids" type="array" required>
+  Set of user IDs to delete. Example: `[12, 34, 56]`.
+</ParamField>
+
+### Response
+
+`200 OK` with an empty body on success. Returns `400 Bad Request` if any target user has a higher-privilege role than the caller.
+
+```bash
+curl -X DELETE http://localhost:8000/api/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[12, 34]'
+```
+
+---
+
+## POST /api/users/updatePass — Change Password
+
+Changes the password of the currently authenticated user. Both the old and new passwords must be sent **RSA-encrypted** using the system's public key — plaintext passwords are never accepted.
+
+**Required permission:** Authenticated only (no special permission).
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="oldPass" type="string" required>
+  The user's current password, RSA-encrypted with the system's public key.
+</ParamField>
+
+<ParamField body="newPass" type="string" required>
+  The desired new password, RSA-encrypted with the system's public key. Must differ from `oldPass` after decryption — the server rejects a new password that matches the current one.
+</ParamField>
+
+### Response
+
+`200 OK` with an empty body on success.
+
+| Error condition | HTTP status | Message |
+|---|---|---|
+| `oldPass` does not match the stored password | `400` | `修改失败，旧密码错误` |
+| `newPass` decrypts to the same value as the current password | `400` | `新密码不能与旧密码相同` |
+
+```bash
+# oldPass and newPass must be RSA-encrypted before sending
+curl -X POST http://localhost:8000/api/users/updatePass \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "oldPass": "<rsa_encrypted_old_password>",
+    "newPass": "<rsa_encrypted_new_password>"
+  }'
+```
+
+---
+
+## POST /api/users/updateAvatar — Upload Profile Photo
+
+Uploads and stores a new profile photo for the currently authenticated user. The saved `avatarPath` is consumed by the face-recognition module that handles seat check-in and check-out — ensure the uploaded image clearly shows the user's face.
+
+**Required permission:** Authenticated only (no special permission).
+
+### Request Body
+
+`Content-Type: multipart/form-data`
+
+<ParamField body="avatar" type="file" required>
+  The image file to upload. Sent as a multipart form field named `avatar`. JPEG and PNG formats are recommended.
+</ParamField>
+
+### Response
+
+`200 OK` with a JSON body containing the updated avatar metadata.
+
+<ResponseField name="avatarName" type="string">
+  The stored filename of the uploaded avatar.
+</ResponseField>
+
+<ResponseField name="avatarPath" type="string">
+  The filesystem path where the avatar was saved. Used by the face-recognition check-in/out service.
+</ResponseField>
+
+```bash
+# Upload avatar for face recognition
+curl -X POST http://localhost:8000/api/users/updateAvatar \
+  -H "Authorization: Bearer <token>" \
+  -F "avatar=@/path/to/photo.jpg"
+```
+
+---
+
+## POST /api/users/updateEmail/{code} — Update Email
+
+Updates the email address for the currently authenticated user after verifying an email verification code. The user's current password must be supplied RSA-encrypted to confirm identity before the change is applied.
+
+**Required permission:** Authenticated only (no special permission).
+
+### Path Parameters
+
+<ParamField path="code" type="string" required>
+  The email verification code that was sent to the user's current or new email address.
+</ParamField>
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="password" type="string" required>
+  The user's current password, RSA-encrypted with the system's public key. The server decrypts and validates this before proceeding.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  The new email address to associate with the account.
+</ParamField>
+
+### Response
+
+`200 OK` with an empty body on success. Returns `400 Bad Request` if the password is incorrect.
+
+```bash
+curl -X POST "http://localhost:8000/api/users/updateEmail/839201" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "password": "<rsa_encrypted_password>",
+    "email": "newemail@example.com"
+  }'
+```

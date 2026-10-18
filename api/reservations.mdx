@@ -1,0 +1,361 @@
+---
+title: "Reservations API: Book Seats and Manage Check-In"
+sidebarTitle: "Reservations"
+description: "REST endpoints for seat reservations — create, query, check in with face recognition, mark temporary absence, and check out. Requires appropriate libraryYuyue permissions."
+---
+
+The Reservations API (`/api/libraryYuyue`) manages the full lifecycle of a seat reservation — from initial booking through face-verified check-in and check-out. A patron books an available seat, checks in by submitting a photo that is verified against their saved avatar via Baidu AI, optionally marks a temporary absence, and then checks out with a second face verification that releases the seat back to available.
+
+### Reservation Status Values
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Pending — reserved but not yet checked in |
+| `1` | Checked in — patron has successfully signed in |
+| `2` | Temporarily absent — patron has stepped away briefly |
+| `3` | Checked out — session completed, seat released |
+
+---
+
+## GET /api/libraryYuyue — List My Reservations
+
+Returns a paginated list of reservations belonging to the **currently authenticated user**. The `userId` filter is applied automatically server-side; patrons cannot query other users' reservations through this endpoint.
+
+**Authentication:** Required  
+**Permission:** `libraryYuyue:list`
+
+### Query Parameters
+
+<ParamField query="page" type="integer">
+  Zero-based page number (Spring `Pageable`). Defaults to `0`.
+</ParamField>
+
+<ParamField query="size" type="integer">
+  Number of records per page. Defaults to `20`.
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="content" type="array">
+  Array of reservation objects for the current page.
+
+  <Expandable title="Reservation object">
+    <ResponseField name="id" type="integer">
+      Auto-generated reservation ID.
+    </ResponseField>
+    <ResponseField name="userId" type="long">
+      ID of the patron who made the reservation.
+    </ResponseField>
+    <ResponseField name="userName" type="string">
+      Username of the patron.
+    </ResponseField>
+    <ResponseField name="roomName" type="string">
+      Name of the reading room containing the reserved seat.
+    </ResponseField>
+    <ResponseField name="seatId" type="integer">
+      ID of the reserved seat.
+    </ResponseField>
+    <ResponseField name="seatName" type="string">
+      Label / card number of the reserved seat.
+    </ResponseField>
+    <ResponseField name="status" type="integer">
+      Current reservation status (0 = pending, 1 = checked in, 2 = temporarily absent, 3 = checked out).
+    </ResponseField>
+    <ResponseField name="yyTime" type="string (timestamp)">
+      Timestamp when the reservation was created (auto-set).
+    </ResponseField>
+    <ResponseField name="startTime" type="string (timestamp)">
+      Timestamp of face-verified check-in. `null` until the patron checks in.
+    </ResponseField>
+    <ResponseField name="endTime" type="string (timestamp)">
+      Timestamp of face-verified check-out. `null` until the patron checks out.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalElements" type="integer">
+  Total number of the current user's reservations.
+</ResponseField>
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryYuyue?page=0&size=10"
+```
+
+---
+
+## GET /api/libraryYuyue/download — Export to Excel
+
+Streams an Excel (`.xlsx`) file of all reservations belonging to the current user.
+
+**Authentication:** Required  
+**Permission:** `libraryYuyue:list`
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryYuyue/download" \
+  --output reservations.xlsx
+```
+
+---
+
+## POST /api/libraryYuyue — Create Reservation
+
+Books an available seat for the currently authenticated patron. The system auto-populates `status`, `userId`, `userName`, `seatName`, and `roomName`, and immediately marks the seat as occupied (status `2`).
+
+**Authentication:** Required  
+**Permission:** `librarySeat:yuyue`
+
+<Warning>
+  If the patron's credit score (`num`) is below `0`, the reservation is **rejected** with the message `"信誉分不足，无法预约"` (Insufficient credit score). Resolve any outstanding violations before attempting to reserve.
+</Warning>
+
+### Request Body
+
+<ParamField body="seatId" type="integer" required>
+  ID of the seat to reserve. The seat must currently be available (status `1`).
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="id" type="integer">
+  Auto-generated ID of the new reservation.
+</ResponseField>
+
+<ResponseField name="userId" type="long">
+  Resolved from the current security context.
+</ResponseField>
+
+<ResponseField name="userName" type="string">
+  Resolved from the current security context.
+</ResponseField>
+
+<ResponseField name="seatId" type="integer">
+  ID of the reserved seat.
+</ResponseField>
+
+<ResponseField name="seatName" type="string">
+  Seat label, resolved from the seat service.
+</ResponseField>
+
+<ResponseField name="roomName" type="string">
+  Room name, resolved from the seat's parent room.
+</ResponseField>
+
+<ResponseField name="status" type="integer">
+  Always `0` (pending) for a newly created reservation.
+</ResponseField>
+
+<ResponseField name="yyTime" type="string (timestamp)">
+  Auto-set creation timestamp.
+</ResponseField>
+
+### Example
+
+```bash
+# Create a reservation for seat 5
+curl -X POST http://localhost:8000/api/libraryYuyue \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"seatId": 5}'
+```
+
+**Sample response (HTTP 201 Created):**
+
+```json
+{
+  "id": 42,
+  "userId": 7,
+  "userName": "jdoe",
+  "roomName": "Reading Room A",
+  "seatId": 5,
+  "seatName": "A-005",
+  "status": 0,
+  "yyTime": "2024-03-15T09:00:00.000+00:00",
+  "startTime": null,
+  "endTime": null
+}
+```
+
+---
+
+## PUT /api/libraryYuyue — Update Reservation
+
+Updates fields on an existing reservation.
+
+**Authentication:** Required  
+**Permission:** `libraryYuyue:edit`
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  ID of the reservation to update.
+</ParamField>
+
+<ParamField body="status" type="integer">
+  Updated reservation status.
+</ParamField>
+
+<ParamField body="startTime" type="string (timestamp)">
+  Updated check-in timestamp.
+</ParamField>
+
+<ParamField body="endTime" type="string (timestamp)">
+  Updated check-out timestamp.
+</ParamField>
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8000/api/libraryYuyue \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 42, "status": 1}'
+```
+
+A successful update returns HTTP `204 No Content`.
+
+---
+
+## DELETE /api/libraryYuyue — Cancel Reservation
+
+Cancels (deletes) one or more reservations by ID.
+
+**Authentication:** Required  
+**Permission:** `libraryYuyue:del`
+
+### Request Body
+
+<ParamField body="ids" type="integer[]" required>
+  JSON array of reservation IDs to cancel, e.g. `[42, 43]`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X DELETE http://localhost:8000/api/libraryYuyue \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[42, 43]'
+```
+
+---
+
+## POST /api/libraryYuyue/dao — Face Check-In
+
+Verifies the patron's identity via Baidu AI face comparison and marks the reservation as checked in. The uploaded photo is compared to the user's saved avatar; a similarity score of **80 or above** is required.
+
+**Authentication:** Required (no additional permission annotation — any authenticated user)
+
+<Warning>
+  The user must have uploaded a profile avatar before attempting check-in. If no avatar is on file, the endpoint returns `"用户未上传头像，请先到个人中心上传头像"` and check-in is blocked.
+</Warning>
+
+### Request (multipart/form-data)
+
+<ParamField body="file" type="file" required>
+  Photo of the patron taken at check-in time. Accepted formats: `gif`, `jpg`, `png`, `jpeg`.
+</ParamField>
+
+<ParamField body="id" type="integer" required>
+  ID of the reservation to check in.
+</ParamField>
+
+<ParamField body="status" type="integer" required>
+  Pass `1` to mark the reservation as checked in.
+</ParamField>
+
+### Behavior
+
+1. The uploaded file is saved to the server's avatar directory.
+2. The server retrieves the current user's saved avatar path.
+3. Baidu AI compares the two images and returns a similarity score.
+4. If score ≥ 80: `status` is updated to the supplied value and `startTime` is set to the current timestamp.
+5. If score < 80: returns `"不是用户本人，无法签到"` (Not the account holder — check-in denied).
+
+### Example
+
+```bash
+# Face check-in
+curl -X POST http://localhost:8000/api/libraryYuyue/dao \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/photo.jpg" \
+  -F "id=42" \
+  -F "status=1"
+```
+
+---
+
+## POST /api/libraryYuyue/li — Mark Temporarily Absent
+
+Sets the reservation status to temporarily absent (status `2`) without performing a face verification. Use this when the patron needs to step away briefly but intends to return.
+
+**Authentication:** Required (no additional permission annotation — any authenticated user)
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  ID of the reservation to update.
+</ParamField>
+
+<ParamField body="status" type="integer" required>
+  Pass `2` to mark the patron as temporarily absent.
+</ParamField>
+
+### Example
+
+```bash
+curl -X POST http://localhost:8000/api/libraryYuyue/li \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 42, "status": 2}'
+```
+
+Returns HTTP `201` with the message `"暂离成功"` (Temporary absence recorded).
+
+---
+
+## POST /api/libraryYuyue/tui — Face Check-Out
+
+Verifies identity via Baidu AI face comparison, marks the reservation as checked out (status `3`), sets `endTime`, and **releases the seat back to available** (seat status → `1`).
+
+**Authentication:** Required (no additional permission annotation — any authenticated user)
+
+<Warning>
+  Like check-in, the user must have a saved profile avatar or check-out will be blocked.
+</Warning>
+
+### Request (multipart/form-data)
+
+<ParamField body="file" type="file" required>
+  Photo of the patron at check-out time. Accepted formats: `gif`, `jpg`, `png`, `jpeg`.
+</ParamField>
+
+<ParamField body="id" type="integer" required>
+  ID of the reservation to check out.
+</ParamField>
+
+<ParamField body="status" type="integer" required>
+  Pass `3` to mark the reservation as checked out.
+</ParamField>
+
+### Behavior
+
+1. Same face-comparison flow as check-in (score ≥ 80 required).
+2. If successful: `status` is set to `3`, `endTime` is recorded, and the associated seat's `status` is updated to `1` (available).
+3. If score < 80: returns `"不是用户本人，无法签退"` (Not the account holder — check-out denied).
+
+### Example
+
+```bash
+# Face check-out
+curl -X POST http://localhost:8000/api/libraryYuyue/tui \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/photo.jpg" \
+  -F "id=42" \
+  -F "status=3"
+```

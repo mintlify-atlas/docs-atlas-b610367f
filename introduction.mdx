@@ -1,0 +1,73 @@
+---
+title: "Library Reservation System: Seat Booking for Modern Libraries"
+sidebarTitle: "Introduction"
+description: "Learn what the Library Reservation System is, who it is for, and the key capabilities it provides for administrators and library patrons."
+---
+
+The Library Reservation System is a Spring Boot 2.6.4 backend service that brings structured, accountable seat management to modern libraries. Built on Java 8 and organized as a three-module Maven project (`library-common`, `library-system`, `library-generator`), it exposes a RESTful API that covers everything from room and seat administration to face-recognition check-in, JWT-secured authentication, and violation tracking — giving both staff and patrons a reliable, self-service reservation experience.
+
+## The Problem It Solves
+
+Libraries with shared reading rooms face a recurring challenge: seats are hard to allocate fairly, occupancy is difficult to verify, and no-shows waste valuable space. Without a centralized system, administrators have no audit trail, and patrons have no way to guarantee a seat before arriving. The Library Reservation System solves this by:
+
+- Letting patrons **reserve a specific seat** in advance and confirm their arrival through face recognition check-in.
+- Giving administrators **real-time visibility** into room capacity, current occupancy, and historical reservation data.
+- Automatically recording **violations** (e.g., no-shows, late departures) so that repeat offenders can be managed according to library policy.
+- Enforcing **JWT-based authentication** and role-level access control so that patron-facing and admin-facing operations are cleanly separated.
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Reservations" icon="calendar-check" href="/features/reservations">
+    Create, query, and cancel seat reservations. Supports check-in and check-out events tied to individual patrons.
+  </Card>
+  <Card title="Rooms & Seats" icon="building-columns" href="/features/rooms-and-seats">
+    Define reading rooms, configure seat layouts, and control availability status for individual seats.
+  </Card>
+  <Card title="Face Recognition" icon="face-viewfinder" href="/features/face-recognition">
+    Integrate with the Baidu AI Face API to verify patron identity at check-in and check-out without manual staff intervention.
+  </Card>
+  <Card title="Violations" icon="triangle-exclamation" href="/features/violations">
+    Record and query patron violations such as no-shows or rule breaches, enabling policy-driven consequences.
+  </Card>
+  <Card title="Security & JWT" icon="lock" href="/configuration/security">
+    Spring Security with stateless JWT tokens, RSA-encrypted password transmission, CAPTCHA login, and configurable token expiry.
+  </Card>
+  <Card title="Users & Roles" icon="users-gear" href="/administration/users-and-roles">
+    Manage users, roles, departments, menus, and permissions through a full admin API.
+  </Card>
+</CardGroup>
+
+## User Roles
+
+The system recognizes two primary roles:
+
+**Administrators** have full access to the management API. Their responsibilities include:
+- Creating and configuring reading rooms and individual seats.
+- Managing user accounts, roles, departments, and permission menus.
+- Reviewing and recording violations against patron accounts.
+- Monitoring current occupancy and reservation history across all rooms.
+
+**Patrons** interact with the reservation-facing endpoints. They can:
+- Browse available rooms and seats.
+- Create and cancel their own reservations.
+- Check in and check out using face recognition.
+- View their own reservation history and any recorded violations.
+
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Application framework | Spring Boot 2.6.4 |
+| Authentication & authorization | Spring Security + JWT (Bearer tokens, RSA-encrypted passwords) |
+| Data persistence | Spring Data JPA + Hibernate (MySQL 5 InnoDB dialect) |
+| Database | MySQL 5.7+ via Alibaba Druid connection pool |
+| Caching & sessions | Redis (online user sessions, CAPTCHA codes, user detail cache) |
+| Face recognition | Baidu AI Face API |
+| API documentation | Knife4j 3.0.3 (Swagger UI at `/doc.html`) |
+| Object mapping | MapStruct 1.4.2 |
+| Utility library | Hutool 5.7.22 |
+
+<Note>
+  The Library Reservation System is a **backend API service only**. It does not ship with a user interface. To interact with it you need a compatible frontend application or an API client such as Postman. The interactive Swagger UI available at `http://localhost:8000/doc.html` (when `swagger.enabled=true`) is the quickest way to explore all available endpoints during development.
+</Note>

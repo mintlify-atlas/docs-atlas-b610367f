@@ -1,0 +1,127 @@
+{
+  "projectType": "saas",
+  "projectName": "Library Reservation System",
+  "projectDescription": "A Spring Boot-based library seat reservation system with reading room management, face-recognition check-in/out, violation reporting, and JWT-secured role-based access control.",
+  "theme": "luma",
+  "primaryColor": "#2D6A4F",
+  "lightColor": "#52B788",
+  "darkColor": "#1B4332",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/reservations",
+              "features/rooms-and-seats",
+              "features/books",
+              "features/violations",
+              "features/face-recognition"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment",
+              "configuration/security",
+              "configuration/redis"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "administration/users-and-roles",
+              "administration/code-generator"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth"
+            ]
+          },
+          {
+            "group": "Library",
+            "pages": [
+              "api/rooms",
+              "api/seats",
+              "api/reservations",
+              "api/books",
+              "api/violations"
+            ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "api/users",
+              "api/roles"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Reading room and seat management with real-time availability status",
+    "Seat reservation workflow with check-in and check-out",
+    "Face recognition-powered check-in and check-out via Baidu AI API",
+    "Violation reporting system with credit score deductions",
+    "JWT authentication with RSA-encrypted passwords and CAPTCHA login",
+    "Role-based access control with fine-grained permission checks",
+    "Redis-backed online user session management",
+    "Book catalog management",
+    "Code generator module for rapid CRUD scaffolding",
+    "Excel data export for all entities"
+  ],
+  "publicApiSurface": [
+    "POST /auth/login",
+    "GET /auth/code",
+    "DELETE /auth/logout",
+    "GET /auth/info",
+    "GET /api/libraryRoom",
+    "POST /api/libraryRoom",
+    "PUT /api/libraryRoom",
+    "DELETE /api/libraryRoom",
+    "GET /api/librarySeat",
+    "POST /api/librarySeat",
+    "PUT /api/librarySeat",
+    "DELETE /api/librarySeat",
+    "GET /api/libraryYuyue",
+    "POST /api/libraryYuyue",
+    "PUT /api/libraryYuyue",
+    "DELETE /api/libraryYuyue",
+    "POST /api/libraryYuyue/dao",
+    "POST /api/libraryYuyue/tui",
+    "POST /api/libraryYuyue/li",
+    "GET /api/libraryBook",
+    "POST /api/libraryBook",
+    "PUT /api/libraryBook",
+    "DELETE /api/libraryBook",
+    "GET /api/libraryVolation",
+    "POST /api/libraryVolation",
+    "PUT /api/libraryVolation",
+    "DELETE /api/libraryVolation",
+    "POST /api/libraryVolation/chuli",
+    "GET /api/users",
+    "POST /api/users",
+    "PUT /api/users",
+    "DELETE /api/users",
+    "POST /api/users/updatePass",
+    "POST /api/users/updateAvatar"
+  ]
+}

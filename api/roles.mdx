@@ -1,0 +1,336 @@
+---
+title: "Roles API: Define Permissions and Data Access Scopes"
+sidebarTitle: "Roles"
+description: "REST endpoints for managing roles in the Library Reservation System. Assign menus, set data scopes, and control permission levels. Requires role permissions."
+---
+
+The Roles API (`/api/roles`) manages the permission roles that control what users can see and do throughout the Library Reservation System. Each role has a **level** (lower integer = higher privilege), a **data scope** that determines which records the role can access, and a set of **menu/permission** assignments that govern what UI sections and API operations are available to its members.
+
+---
+
+## Data Scope Values
+
+The `dataScope` field on a role controls which department records a user assigned to that role can see.
+
+| Value | Meaning |
+|-------|---------|
+| `全部` | Access all data regardless of department |
+| `本级` | Access data belonging to the user's own department only |
+| `自定义` | Access data from explicitly assigned departments only (list provided in `depts`) |
+
+When `dataScope` is `自定义`, the `depts` array on the role must contain the set of departments whose data this role is permitted to view.
+
+<Note>
+  Role levels enforce a strict hierarchy. An administrator with level `2` cannot create, update, or delete a role whose level is `1` (higher privilege). The same guard applies when assigning roles to users — you cannot grant a user a role whose level is lower (higher privilege) than your own. This protects against privilege escalation at every mutation point in the API.
+</Note>
+
+---
+
+## GET /api/roles/{id} — Get Role by ID
+
+Returns a single role by its numeric ID.
+
+**Required permission:** `roles:list`
+
+### Path Parameters
+
+<ParamField path="id" type="long" required>
+  The ID of the role to retrieve.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="long">Unique role ID.</ResponseField>
+<ResponseField name="name" type="string">Unique role name.</ResponseField>
+<ResponseField name="level" type="integer">Privilege level. Lower values denote higher privilege. Defaults to `3`.</ResponseField>
+<ResponseField name="dataScope" type="string">Data access scope: `全部`, `本级`, or `自定义`.</ResponseField>
+<ResponseField name="description" type="string">Human-readable description of the role's purpose.</ResponseField>
+<ResponseField name="menus" type="array">Array of menu objects assigned to this role.</ResponseField>
+<ResponseField name="depts" type="array">Array of department objects. Populated when `dataScope` is `自定义`.</ResponseField>
+<ResponseField name="createTime" type="string">ISO-8601 timestamp of when the role was created.</ResponseField>
+
+```bash
+curl http://localhost:8000/api/roles/3 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /api/roles — List Roles (paginated)
+
+Returns a paginated list of roles, optionally filtered by a fuzzy search term.
+
+**Required permission:** `roles:list`
+
+### Query Parameters
+
+<ParamField query="blurry" type="string">
+  Fuzzy search term matched simultaneously against `name` and `description`.
+</ParamField>
+
+<ParamField query="createTime" type="array">
+  Timestamp range filter as a two-element array `[start, end]`. Returns roles created within the given window.
+</ParamField>
+
+<ParamField query="page" type="integer" default="0">
+  Zero-based page number.
+</ParamField>
+
+<ParamField query="size" type="integer" default="10">
+  Number of results per page.
+</ParamField>
+
+### Response
+
+Returns a standard Spring Data page envelope.
+
+<ResponseField name="content" type="array">
+  Array of role objects matching the query (same schema as `GET /api/roles/{id}`).
+</ResponseField>
+
+<ResponseField name="totalElements" type="long">Total number of roles matching the filter.</ResponseField>
+<ResponseField name="totalPages" type="integer">Total number of pages at the requested `size`.</ResponseField>
+<ResponseField name="number" type="integer">Current zero-based page number.</ResponseField>
+<ResponseField name="size" type="integer">Page size used for this response.</ResponseField>
+
+```bash
+# List all roles
+curl -H "Authorization: Bearer <token>" http://localhost:8000/api/roles
+
+# Filter roles by name keyword with pagination
+curl -G http://localhost:8000/api/roles \
+  -H "Authorization: Bearer <token>" \
+  --data-urlencode "blurry=librarian" \
+  --data-urlencode "page=0" \
+  --data-urlencode "size=10"
+```
+
+---
+
+## GET /api/roles/all — List All Roles (no pagination)
+
+Returns every role in the system as a flat, unpaginated array. Used when building role-assignment dropdowns in the user creation and edit forms.
+
+**Required permission:** Any one of `roles:list`, `user:add`, or `user:edit`.
+
+### Response
+
+A JSON array of role objects (same schema as `GET /api/roles/{id}`).
+
+```bash
+curl http://localhost:8000/api/roles/all \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /api/roles/level — Get Current User's Role Level
+
+Returns the minimum (highest-privilege) role level held by the currently authenticated user. Front-end clients use this value to determine which roles are available for the user to assign to others — they should only display roles with a `level` greater than or equal to this value.
+
+**Required permission:** Authenticated only (no special permission).
+
+### Response
+
+<ResponseField name="level" type="integer">
+  The minimum role level of all roles assigned to the currently authenticated user. A lower number means higher privilege (e.g. `1` is superadmin, `3` is a default member).
+</ResponseField>
+
+```bash
+curl http://localhost:8000/api/roles/level \
+  -H "Authorization: Bearer <token>"
+```
+
+Example response:
+
+```json
+{
+  "level": 2
+}
+```
+
+---
+
+## GET /api/roles/download — Export Roles to Excel
+
+Streams an Excel file (.xlsx) containing all roles matching the supplied filter criteria.
+
+**Required permission:** `role:list`
+
+### Query Parameters
+
+Same filter criteria as `GET /api/roles` (`blurry`, `createTime`). Pagination parameters are ignored — the full result set is exported.
+
+```bash
+curl -G http://localhost:8000/api/roles/download \
+  -H "Authorization: Bearer <token>" \
+  -o roles_export.xlsx
+```
+
+---
+
+## POST /api/roles — Create Role
+
+Creates a new role. The caller's minimum role level must be less than or equal to the `level` of the new role — you cannot create a role with higher privileges than your own.
+
+**Required permission:** `roles:add`
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="name" type="string" required>
+  Unique role name. Must not be blank.
+</ParamField>
+
+<ParamField body="level" type="integer">
+  Privilege level. Lower values grant higher privilege. Defaults to `3` if omitted. Must be greater than or equal to the caller's own minimum level.
+</ParamField>
+
+<ParamField body="dataScope" type="string">
+  Data access scope. One of `全部`, `本级`, or `自定义`. Defaults to `本级` (`DataScopeEnum.THIS_LEVEL`) if omitted.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional human-readable description of the role's intended purpose.
+</ParamField>
+
+<ParamField body="depts" type="array">
+  Array of department reference objects `[{"id": N}, ...]`. Required when `dataScope` is `自定义`; ignored for other scope values.
+</ParamField>
+
+### Response
+
+`201 Created` with an empty body on success. Returns `400 Bad Request` if an `id` is supplied (new roles must not include an ID) or if the caller lacks sufficient privilege level.
+
+```bash
+# Create a new role
+curl -X POST http://localhost:8000/api/roles \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Librarian",
+    "level": 2,
+    "dataScope": "全部",
+    "description": "Can manage rooms, seats, and books"
+  }'
+```
+
+---
+
+## PUT /api/roles — Update Role
+
+Updates the fields of an existing role. The privilege-level guard is re-evaluated — you cannot modify a role to have a higher level (lower number) than your own.
+
+**Required permission:** `roles:edit`
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="id" type="long" required>
+  ID of the role to update. Required for the `Update` validation group.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Updated role name.
+</ParamField>
+
+<ParamField body="level" type="integer">
+  Updated privilege level. Must be greater than or equal to the caller's own minimum level.
+</ParamField>
+
+<ParamField body="dataScope" type="string">
+  Updated data scope: `全部`, `本级`, or `自定义`.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description.
+</ParamField>
+
+<ParamField body="depts" type="array">
+  Updated department list (relevant when `dataScope` is `自定义`).
+</ParamField>
+
+### Response
+
+`204 No Content` on success.
+
+```bash
+curl -X PUT http://localhost:8000/api/roles \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 5,
+    "name": "Librarian",
+    "level": 2,
+    "dataScope": "自定义",
+    "description": "Manages rooms, seats, and books in assigned branches",
+    "depts": [{"id": 3}, {"id": 7}]
+  }'
+```
+
+---
+
+## PUT /api/roles/menu — Update Role Menu Assignments
+
+Replaces the set of menus (and their associated permissions) assigned to a role. The caller's minimum role level is checked against the target role's level — you cannot alter the menu assignments of a role more privileged than yourself.
+
+**Required permission:** `roles:edit`
+
+### Request Body
+
+`Content-Type: application/json`
+
+<ParamField body="id" type="long" required>
+  ID of the role whose menus should be updated.
+</ParamField>
+
+<ParamField body="menus" type="array" required>
+  Array of menu reference objects `[{"id": N}, ...]` representing the new complete set of menu assignments for this role. The existing assignments are replaced entirely.
+</ParamField>
+
+### Response
+
+`204 No Content` on success.
+
+```bash
+curl -X PUT http://localhost:8000/api/roles/menu \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 5,
+    "menus": [{"id": 10}, {"id": 11}, {"id": 22}]
+  }'
+```
+
+---
+
+## DELETE /api/roles — Delete Roles
+
+Deletes one or more roles by ID. Before deletion the server verifies:
+1. The caller's minimum role level is less than or equal to the level of each target role (privilege guard).
+2. None of the target roles are currently assigned to any user (referential integrity check). If a role is still in use, the request is rejected.
+
+**Required permission:** `roles:del`
+
+### Request Body
+
+`Content-Type: application/json`
+
+A JSON array of role IDs (`long`) to delete.
+
+<ParamField body="ids" type="array" required>
+  Set of role IDs to delete. Example: `[4, 7]`.
+</ParamField>
+
+### Response
+
+`200 OK` with an empty body on success. Returns `400 Bad Request` if privilege validation fails or if any role is still assigned to a user.
+
+```bash
+curl -X DELETE http://localhost:8000/api/roles \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[4, 7]'
+```

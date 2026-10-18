@@ -1,0 +1,142 @@
+---
+title: "JWT Authentication and Security Configuration"
+sidebarTitle: "Security"
+description: "Configure JWT token settings, RSA password encryption, CAPTCHA login, and Spring Security for the Library Reservation System."
+---
+
+Security is implemented with **Spring Security + JWT**. The authentication flow works as follows:
+
+1. The client RSA-encrypts the user's password with the server's public key before sending it.
+2. The server decrypts the password, validates credentials, and issues a signed JWT.
+3. The JWT is stored in Redis under a configurable key prefix, enabling online session tracking and forced logout.
+4. Every subsequent request must supply the token in the `Authorization` HTTP header.
+5. Login attempts are gated by an arithmetic CAPTCHA to prevent brute-force attacks.
+
+---
+
+## JWT Settings
+
+All JWT settings live under the `jwt` key in `application-dev.yml` and are mapped into the `SecurityProperties` bean.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `jwt.header` | `Authorization` | HTTP request header that carries the token |
+| `jwt.token-start-with` | `Bearer` | Token prefix (the server appends a trailing space automatically) |
+| `jwt.base64-secret` | *(long Base64 string)* | HMAC-SHA signing key — **replace in production** |
+| `jwt.token-validity-in-seconds` | `14400000` (4 hours) | Token lifetime in milliseconds |
+| `jwt.online-key` | `online-token-` | Redis key prefix used to track online user sessions |
+| `jwt.code-key` | `code-key-` | Redis key prefix used to store CAPTCHA answers |
+| `jwt.detect` | `1800000` (30 min) | Time window before expiry (ms) in which an active request triggers renewal |
+| `jwt.renew` | `3600000` (1 hour) | Amount of time (ms) added to the token's expiry on renewal |
+
+Example configuration block from `application-dev.yml`:
+
+```yaml
+jwt:
+  header: Authorization
+  token-start-with: Bearer
+  base64-secret: ZmQ0ZGI5NjQ0MDQwY2I4MjMxY2Y3ZmI3MjdhN2ZmMjNhODViOTg1ZGE0NTBjMGM4NDA5NzYxMjdjOWMwYWRmZTBlZjlhNGY3ZTg4Y2U3YTE1ODVkZDU5Y2Y3OGYwZWE1NzUzNWQ2YjFjZDc0NGMxZWU2MmQ3MjY1NzJmNTE0MzI=
+  token-validity-in-seconds: 14400000
+  online-key: online-token-
+  code-key: code-key-
+  detect: 1800000
+  renew: 3600000
+```
+
+<Warning>
+  The `base64-secret` value shown above is the development default. You **must** replace it with a securely generated secret of at least 88 Base64 characters before deploying to production. You can generate one at [convertworld.com](https://www.convertworld.com/zh-hans/time/milliseconds.html) or with any Base64-safe random generator.
+</Warning>
+
+---
+
+## RSA Password Encryption
+
+Passwords are never sent in plaintext. The client encrypts the password with the RSA public key (derived from the server's private key), and the server decrypts it with `RsaUtils.decryptByPrivateKey()` before any credential validation occurs.
+
+The private key is loaded by the `RsaProperties` bean via:
+
+```yaml
+rsa:
+  private_key: <Base64-encoded PKCS#8 private key>
+```
+
+In `application.yml` the development private key is pre-populated. For production, generate a new RSA key pair and replace both the `rsa.private_key` value in the server configuration and the corresponding public key in the frontend client.
+
+```java
+// RsaProperties.java — how the key is injected
+@Value("${rsa.private_key}")
+public void setPrivateKey(String privateKey) {
+    RsaProperties.privateKey = privateKey;
+}
+```
+
+<Warning>
+  Never commit a production RSA private key to source control. Inject it via an environment variable or a secrets manager and reference it with a Spring `${...}` placeholder.
+</Warning>
+
+---
+
+## CAPTCHA Configuration
+
+Every login request must be accompanied by a valid CAPTCHA answer. Settings are under the `login.login-code` key in `application-dev.yml` and are mapped into the `LoginCode` bean.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `login.login-code.code-type` | `arithmetic` | CAPTCHA variant — `arithmetic`, `chinese`, `chinese_gif`, `gif`, or `spec` |
+| `login.login-code.expiration` | `2` | CAPTCHA validity period in **minutes** |
+| `login.login-code.width` | `111` | Generated image width in pixels |
+| `login.login-code.height` | `36` | Generated image height in pixels |
+| `login.login-code.length` | `2` | Number of operands in the arithmetic expression |
+| `login.login-code.font-size` | `25` | Font size used to render the CAPTCHA text |
+
+The `arithmetic` type renders an expression such as `3+7=?` — the user must submit the numeric result. The `LoginProperties.getCaptcha()` factory method instantiates the correct EasyCaptcha implementation based on `code-type`.
+
+Example:
+
+```yaml
+login:
+  login-code:
+    code-type: arithmetic
+    expiration: 2
+    width: 111
+    height: 36
+    length: 2
+    font-size: 25
+```
+
+---
+
+## Single-Login Enforcement
+
+```yaml
+login:
+  single-login: false
+```
+
+When `single-login` is set to `true`, logging in from a new session will automatically invalidate and kick any existing active session for the same user account. Set this to `true` in environments that require strict single-session enforcement.
+
+---
+
+## User Detail Cache
+
+```yaml
+login:
+  user-cache:
+    idle-time: 7200
+```
+
+After a successful login, the user's `JwtUserDto` details are serialized and cached in Redis. The `idle-time` value (in **seconds**) controls how long this cache entry lives. The default is 7200 seconds (2 hours). Increasing this value reduces database lookups on repeated requests; decreasing it forces more frequent revalidation.
+
+---
+
+## Anonymous (Public) Endpoints
+
+The following endpoints are accessible without a valid JWT token. They are annotated in the source with `@AnonymousPostMapping` or `@AnonymousGetMapping`, which registers them on Spring Security's permit-all list at startup:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/auth/login` | Submit credentials and CAPTCHA to receive a JWT |
+| `GET` | `/auth/code` | Fetch a new CAPTCHA image |
+| `DELETE` | `/auth/logout` | Invalidate the current session token |
+
+All other API paths require a valid `Authorization: Bearer <token>` header.

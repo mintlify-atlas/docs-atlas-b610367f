@@ -1,0 +1,103 @@
+---
+title: "Book Catalog Management"
+sidebarTitle: "Books"
+description: "Manage the library book catalog. Add, update, and remove books with title, author, publisher, price, and publication date fields."
+---
+
+The book catalog is managed via `/api/libraryBook`. It provides a simple inventory of the titles available in the library, with basic bibliographic metadata. The catalog supports full CRUD operations and Excel export for offline reporting.
+
+---
+
+## Book Entity Fields
+
+Book records are stored in the `library_book` table with the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Auto-generated primary key |
+| `name` | String | Title of the book |
+| `author` | String | Author name(s) |
+| `press` | String | Publisher name |
+| `price` | Double | List price of the book |
+| `pressTime` | Timestamp | Publication timestamp — automatically set on record creation via `@CreationTimestamp`; do not supply this field in request bodies |
+
+---
+
+## Endpoints
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/libraryBook` | `libraryBook:list` | Paginated list of books, with optional query filters |
+| `GET` | `/api/libraryBook/download` | `libraryBook:list` | Download the full catalog as an Excel file |
+| `POST` | `/api/libraryBook` | `libraryBook:add` | Add a new book to the catalog |
+| `PUT` | `/api/libraryBook` | `libraryBook:edit` | Update an existing book record |
+| `DELETE` | `/api/libraryBook` | `libraryBook:del` | Delete books by array of ids |
+
+---
+
+## Creating a Book
+
+Send a `POST` request to `/api/libraryBook` with a JSON body. Omit `pressTime` — it is automatically set by Hibernate's `@CreationTimestamp` when the record is persisted.
+
+```json
+{
+  "name": "Clean Code",
+  "author": "Robert C. Martin",
+  "press": "Prentice Hall",
+  "price": 45.00
+}
+```
+
+A successful response returns HTTP 201 with the created book object, including the auto-generated `id` and the server-assigned `pressTime`.
+
+---
+
+## Updating a Book
+
+Send a `PUT` request to `/api/libraryBook` with the full book object, including its `id`. A successful update returns HTTP 204 (No Content).
+
+```json
+{
+  "id": 7,
+  "name": "Clean Code",
+  "author": "Robert C. Martin",
+  "press": "Prentice Hall",
+  "price": 49.99
+}
+```
+
+---
+
+## Deleting Books
+
+Send a `DELETE` request to `/api/libraryBook` with a JSON array of integer ids to remove multiple records in a single call:
+
+```json
+[3, 7, 12]
+```
+
+---
+
+## Automatic Publication Timestamp
+
+The `pressTime` field is annotated with Hibernate's `@CreationTimestamp`:
+
+```java
+@Column(name = "`press_time`")
+@CreationTimestamp
+@ApiModelProperty(value = "出版时间")
+private Timestamp pressTime;
+```
+
+This means the database timestamp is captured at the moment the `INSERT` statement runs. You cannot set or override `pressTime` through the API.
+
+---
+
+## Required Permissions
+
+| Permission | Grants Access To |
+|------------|-----------------|
+| `libraryBook:list` | View the book catalog and download Excel |
+| `libraryBook:add` | Add a new book |
+| `libraryBook:edit` | Update an existing book |
+| `libraryBook:del` | Delete books |

@@ -1,0 +1,268 @@
+---
+title: "Books API: Manage the Library Book Catalog"
+sidebarTitle: "Books"
+description: "REST endpoints for the library book catalog. List, create, update, and delete books with title, author, publisher, price, and publication date."
+---
+
+The Books API (`/api/libraryBook`) provides full CRUD operations over the library's book catalog. Each entry records the title, author, publisher, and price. The publication timestamp (`pressTime`) is set automatically to the record's creation time and is not supplied by the client.
+
+---
+
+## GET /api/libraryBook — List Books (paginated)
+
+Returns a paginated list of books from the catalog. Supports Spring `Pageable` query parameters for page navigation.
+
+**Authentication:** Required  
+**Permission:** `libraryBook:list`
+
+### Query Parameters
+
+<ParamField query="page" type="integer">
+  Zero-based page number. Defaults to `0`.
+</ParamField>
+
+<ParamField query="size" type="integer">
+  Number of records per page. Defaults to `20`.
+</ParamField>
+
+<ParamField query="name" type="string">
+  Optional filter by book title (partial match).
+</ParamField>
+
+<ParamField query="author" type="string">
+  Optional filter by author name (partial match).
+</ParamField>
+
+<ParamField query="press" type="string">
+  Optional filter by publisher name (partial match).
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="content" type="array">
+  Array of book objects for the current page.
+
+  <Expandable title="Book object">
+    <ResponseField name="id" type="integer">
+      Auto-generated primary key.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Book title.
+    </ResponseField>
+    <ResponseField name="author" type="string">
+      Author name.
+    </ResponseField>
+    <ResponseField name="press" type="string">
+      Publisher name.
+    </ResponseField>
+    <ResponseField name="price" type="number">
+      Book price (double).
+    </ResponseField>
+    <ResponseField name="pressTime" type="string (timestamp)">
+      Record creation timestamp (used as publication date). Auto-set by `@CreationTimestamp`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalElements" type="integer">
+  Total number of books matching the filter criteria.
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total number of pages at the requested page size.
+</ResponseField>
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryBook?page=0&size=10"
+```
+
+---
+
+## GET /api/libraryBook/download — Export to Excel
+
+Streams an Excel (`.xlsx`) file of all books matching the optional filter criteria.
+
+**Authentication:** Required  
+**Permission:** `libraryBook:list`
+
+### Query Parameters
+
+<ParamField query="name" type="string">
+  Optional filter by book title.
+</ParamField>
+
+<ParamField query="author" type="string">
+  Optional filter by author name.
+</ParamField>
+
+<ParamField query="press" type="string">
+  Optional filter by publisher name.
+</ParamField>
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryBook/download" \
+  --output books.xlsx
+```
+
+---
+
+## POST /api/libraryBook — Add Book
+
+Adds a new entry to the library catalog. Returns the persisted book object with its generated `id` and auto-set `pressTime`.
+
+**Authentication:** Required  
+**Permission:** `libraryBook:add`
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Book title (e.g. `"Clean Code"`).
+</ParamField>
+
+<ParamField body="author" type="string" required>
+  Author name (e.g. `"Robert C. Martin"`).
+</ParamField>
+
+<ParamField body="press" type="string" required>
+  Publisher name (e.g. `"Prentice Hall"`).
+</ParamField>
+
+<ParamField body="price" type="number" required>
+  Book price as a decimal number (e.g. `45.00`).
+</ParamField>
+
+<Note>
+  `pressTime` is automatically set to the creation timestamp via Hibernate's `@CreationTimestamp` — do not include it in the request body.
+</Note>
+
+### Response Fields
+
+<ResponseField name="id" type="integer">
+  Auto-generated ID assigned to the new book.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Title as provided.
+</ResponseField>
+
+<ResponseField name="author" type="string">
+  Author as provided.
+</ResponseField>
+
+<ResponseField name="press" type="string">
+  Publisher as provided.
+</ResponseField>
+
+<ResponseField name="price" type="number">
+  Price as provided.
+</ResponseField>
+
+<ResponseField name="pressTime" type="string (timestamp)">
+  Auto-generated record creation timestamp.
+</ResponseField>
+
+### Example
+
+```bash
+# Add a new book
+curl -X POST http://localhost:8000/api/libraryBook \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Clean Code",
+    "author": "Robert C. Martin",
+    "press": "Prentice Hall",
+    "price": 45.00
+  }'
+```
+
+**Sample response (HTTP 201 Created):**
+
+```json
+{
+  "id": 15,
+  "name": "Clean Code",
+  "author": "Robert C. Martin",
+  "press": "Prentice Hall",
+  "price": 45.0,
+  "pressTime": "2024-03-15T10:30:00.000+00:00"
+}
+```
+
+---
+
+## PUT /api/libraryBook — Update Book
+
+Updates an existing book entry. All supplied fields overwrite the stored values.
+
+**Authentication:** Required  
+**Permission:** `libraryBook:edit`
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  ID of the book to update.
+</ParamField>
+
+<ParamField body="name" type="string">
+  Updated book title.
+</ParamField>
+
+<ParamField body="author" type="string">
+  Updated author name.
+</ParamField>
+
+<ParamField body="press" type="string">
+  Updated publisher name.
+</ParamField>
+
+<ParamField body="price" type="number">
+  Updated price.
+</ParamField>
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8000/api/libraryBook \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 15,
+    "name": "Clean Code (2nd Edition)",
+    "price": 49.99
+  }'
+```
+
+A successful update returns HTTP `204 No Content`.
+
+---
+
+## DELETE /api/libraryBook — Delete Books
+
+Deletes one or more book entries by their IDs.
+
+**Authentication:** Required  
+**Permission:** `libraryBook:del`
+
+### Request Body
+
+<ParamField body="ids" type="integer[]" required>
+  JSON array of book IDs to delete, e.g. `[15, 16]`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X DELETE http://localhost:8000/api/libraryBook \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[15, 16]'
+```
+
+A successful deletion returns HTTP `200 OK`.

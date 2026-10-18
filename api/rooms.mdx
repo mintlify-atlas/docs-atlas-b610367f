@@ -1,0 +1,230 @@
+---
+title: "Reading Rooms API: CRUD and Data Export"
+sidebarTitle: "Rooms"
+description: "REST endpoints for managing library reading rooms. Create, query, update, and delete rooms. Export room data to Excel. Requires libraryRoom permissions."
+---
+
+The Reading Rooms API (`/api/libraryRoom`) manages the physical reading rooms in the library. Each room has a name and a physical address. Seats are created within rooms and reference a room by its ID. Most operations require an authenticated token and a `libraryRoom` permission.
+
+---
+
+## GET /api/libraryRoom — List Rooms (paginated)
+
+Returns a paginated list of reading rooms. Optionally filter by `name` or `address`.
+
+**Authentication:** Required  
+**Permission:** `libraryRoom:list`
+
+### Query Parameters
+
+<ParamField query="page" type="integer">
+  Zero-based page number (Spring `Pageable`). Defaults to `0`.
+</ParamField>
+
+<ParamField query="size" type="integer">
+  Number of records per page. Defaults to `20`.
+</ParamField>
+
+<ParamField query="name" type="string">
+  Filter rooms whose name contains this value (case-insensitive partial match).
+</ParamField>
+
+<ParamField query="address" type="string">
+  Filter rooms whose address contains this value.
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="content" type="array">
+  Array of room objects for the current page.
+
+  <Expandable title="Room object">
+    <ResponseField name="id" type="integer">
+      Auto-generated primary key.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Display name of the reading room.
+    </ResponseField>
+    <ResponseField name="address" type="string">
+      Physical location description (e.g. "Building 1, Floor 2").
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalElements" type="integer">
+  Total number of rooms matching the filter criteria.
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total number of pages at the requested page size.
+</ResponseField>
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryRoom?page=0&size=10"
+```
+
+---
+
+## GET /api/libraryRoom/select — List All Rooms (no pagination)
+
+Returns a flat list of **all** rooms without pagination. Useful for populating dropdown menus in the UI (e.g. when creating a seat).
+
+**Authentication:** None (anonymous)
+
+### Example
+
+```bash
+curl http://localhost:8000/api/libraryRoom/select
+```
+
+**Sample response:**
+
+```json
+[
+  { "id": 1, "name": "Reading Room A", "address": "Building 1, Floor 2" },
+  { "id": 2, "name": "Reading Room B", "address": "Building 2, Floor 1" }
+]
+```
+
+---
+
+## GET /api/libraryRoom/download — Export to Excel
+
+Streams an Excel (`.xlsx`) file containing all rooms that match the optional filter criteria. The response `Content-Type` is `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+
+**Authentication:** Required  
+**Permission:** `libraryRoom:list`
+
+### Query Parameters
+
+<ParamField query="name" type="string">
+  Optional filter by room name.
+</ParamField>
+
+<ParamField query="address" type="string">
+  Optional filter by room address.
+</ParamField>
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryRoom/download" \
+  --output rooms.xlsx
+```
+
+---
+
+## POST /api/libraryRoom — Create Room
+
+Creates a new reading room. Returns the persisted room object with its generated `id`.
+
+**Authentication:** Required  
+**Permission:** `libraryRoom:add`
+
+### Request Body
+
+<ParamField body="name" type="string">
+  Display name for the new reading room (e.g. `"Reading Room A"`).
+</ParamField>
+
+<ParamField body="address" type="string">
+  Physical location of the room (e.g. `"Building 1, Floor 2"`).
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="id" type="integer">
+  Auto-generated ID assigned to the new room.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Name of the created room.
+</ResponseField>
+
+<ResponseField name="address" type="string">
+  Address of the created room.
+</ResponseField>
+
+### Example
+
+```bash
+# Create a room
+curl -X POST http://localhost:8000/api/libraryRoom \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Reading Room A", "address": "Building 1, Floor 2"}'
+```
+
+**Sample response (HTTP 201 Created):**
+
+```json
+{
+  "id": 3,
+  "name": "Reading Room A",
+  "address": "Building 1, Floor 2"
+}
+```
+
+---
+
+## PUT /api/libraryRoom — Update Room
+
+Updates an existing reading room. All supplied fields overwrite the stored values.
+
+**Authentication:** Required  
+**Permission:** `libraryRoom:edit`
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  ID of the room to update.
+</ParamField>
+
+<ParamField body="name" type="string">
+  Updated room name.
+</ParamField>
+
+<ParamField body="address" type="string">
+  Updated physical location.
+</ParamField>
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8000/api/libraryRoom \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 3, "name": "Reading Room A (Renovated)", "address": "Building 1, Floor 3"}'
+```
+
+A successful update returns HTTP `204 No Content`.
+
+---
+
+## DELETE /api/libraryRoom — Delete Rooms
+
+Deletes one or more rooms by their IDs. The request body is a JSON array of integer IDs.
+
+**Authentication:** Required  
+**Permission:** `libraryRoom:del`
+
+### Request Body
+
+<ParamField body="ids" type="integer[]" required>
+  JSON array of room IDs to delete, e.g. `[1, 2, 3]`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X DELETE http://localhost:8000/api/libraryRoom \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[1, 2, 3]'
+```
+
+A successful deletion returns HTTP `200 OK`.

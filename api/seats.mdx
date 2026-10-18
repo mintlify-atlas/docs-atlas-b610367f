@@ -1,0 +1,247 @@
+---
+title: "Seats API: Manage and Query Library Seats"
+sidebarTitle: "Seats"
+description: "REST endpoints for managing library seats within reading rooms. Create seats, query availability by status, and export seat data. Requires librarySeat permissions."
+---
+
+Seats (`/api/librarySeat`) belong to reading rooms and track real-time occupancy. Each seat has a label (`card`), a parent room (`roomId`), and a `status` that reflects whether the seat is currently available or occupied. When a seat is reserved via the Reservations API, its status is automatically updated; when the patron checks out, it is released back to available.
+
+### Seat Status Values
+
+| Value | Meaning |
+|-------|---------|
+| `1` | Available — the seat can be reserved |
+| `2` | Occupied — the seat is currently reserved |
+
+---
+
+## GET /api/librarySeat — List Seats (paginated)
+
+Returns a paginated list of seats. Filter by room, status, or seat label.
+
+**Authentication:** Required  
+**Permission:** `librarySeat:list`
+
+### Query Parameters
+
+<ParamField query="page" type="integer">
+  Zero-based page number (Spring `Pageable`). Defaults to `0`.
+</ParamField>
+
+<ParamField query="size" type="integer">
+  Number of records per page. Defaults to `20`.
+</ParamField>
+
+<ParamField query="roomId" type="integer">
+  Filter seats that belong to this room ID.
+</ParamField>
+
+<ParamField query="status" type="integer">
+  Filter by seat status: `1` (available) or `2` (occupied).
+</ParamField>
+
+<ParamField query="card" type="string">
+  Filter by seat label / number (partial match).
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="content" type="array">
+  Array of seat objects for the current page.
+
+  <Expandable title="Seat object">
+    <ResponseField name="id" type="integer">
+      Auto-generated primary key.
+    </ResponseField>
+    <ResponseField name="card" type="string">
+      Seat label or number (e.g. `"A-001"`).
+    </ResponseField>
+    <ResponseField name="roomId" type="integer">
+      ID of the parent reading room.
+    </ResponseField>
+    <ResponseField name="roomName" type="string">
+      Display name of the parent reading room (populated automatically from the room service).
+    </ResponseField>
+    <ResponseField name="status" type="integer">
+      Current occupancy status: `1` = available, `2` = occupied.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalElements" type="integer">
+  Total number of seats matching the filter criteria.
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total number of pages at the requested page size.
+</ResponseField>
+
+### Example
+
+```bash
+# List available seats in room 1
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/librarySeat?roomId=1&status=1&page=0&size=20"
+```
+
+---
+
+## GET /api/librarySeat/download — Export to Excel
+
+Streams an Excel (`.xlsx`) file of all seats matching the optional filter criteria.
+
+**Authentication:** Required  
+**Permission:** `librarySeat:list`
+
+### Query Parameters
+
+<ParamField query="roomId" type="integer">
+  Optional filter by room ID.
+</ParamField>
+
+<ParamField query="status" type="integer">
+  Optional filter by status (`1` or `2`).
+</ParamField>
+
+<ParamField query="card" type="string">
+  Optional filter by seat label.
+</ParamField>
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/librarySeat/download" \
+  --output seats.xlsx
+```
+
+---
+
+## POST /api/librarySeat — Create Seat
+
+Creates a new seat within a reading room. The server automatically looks up the room name from the room service and sets `status` to `1` (available).
+
+**Authentication:** Required  
+**Permission:** `librarySeat:add`
+
+### Request Body
+
+<ParamField body="card" type="string" required>
+  Seat label or number that patrons will see (e.g. `"A-001"`).
+</ParamField>
+
+<ParamField body="roomId" type="integer" required>
+  ID of the parent reading room. Must reference an existing room.
+</ParamField>
+
+<Note>
+  `roomName` is resolved automatically from the room service — do not include it in the request. `status` is always initialised to `1` (available) on creation.
+</Note>
+
+### Response Fields
+
+<ResponseField name="id" type="integer">
+  Auto-generated ID assigned to the new seat.
+</ResponseField>
+
+<ResponseField name="card" type="string">
+  Seat label as provided.
+</ResponseField>
+
+<ResponseField name="roomId" type="integer">
+  Parent room ID.
+</ResponseField>
+
+<ResponseField name="roomName" type="string">
+  Display name of the parent room, resolved server-side.
+</ResponseField>
+
+<ResponseField name="status" type="integer">
+  Always `1` (available) for a newly created seat.
+</ResponseField>
+
+### Example
+
+```bash
+# Create a seat in room 1
+curl -X POST http://localhost:8000/api/librarySeat \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"card": "A-001", "roomId": 1}'
+```
+
+**Sample response (HTTP 201 Created):**
+
+```json
+{
+  "id": 10,
+  "card": "A-001",
+  "roomId": 1,
+  "roomName": "Reading Room A",
+  "status": 1
+}
+```
+
+---
+
+## PUT /api/librarySeat — Update Seat
+
+Updates an existing seat. The server re-resolves `roomName` from the room service based on the supplied `roomId`.
+
+**Authentication:** Required  
+**Permission:** `librarySeat:edit`
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  ID of the seat to update.
+</ParamField>
+
+<ParamField body="card" type="string">
+  Updated seat label.
+</ParamField>
+
+<ParamField body="roomId" type="integer">
+  Updated parent room ID. `roomName` is re-resolved automatically.
+</ParamField>
+
+<ParamField body="status" type="integer">
+  Updated occupancy status (`1` or `2`).
+</ParamField>
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8000/api/librarySeat \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 10, "card": "A-001-Updated", "roomId": 2}'
+```
+
+A successful update returns HTTP `204 No Content`.
+
+---
+
+## DELETE /api/librarySeat — Delete Seats
+
+Deletes one or more seats by their IDs.
+
+**Authentication:** Required  
+**Permission:** `librarySeat:del`
+
+### Request Body
+
+<ParamField body="ids" type="integer[]" required>
+  JSON array of seat IDs to delete, e.g. `[10, 11, 12]`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X DELETE http://localhost:8000/api/librarySeat \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[10, 11, 12]'
+```
+
+A successful deletion returns HTTP `200 OK`.

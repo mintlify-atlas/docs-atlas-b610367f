@@ -1,0 +1,303 @@
+---
+title: "Violations API: Report and Process Patron Misconduct"
+sidebarTitle: "Violations"
+description: "REST endpoints for submitting violation reports against patrons and processing them with credit score deductions. Requires libraryVolation permissions."
+---
+
+The Violations API (`/api/libraryVolation`) handles the complete lifecycle of misconduct reports — from patron submission through admin review and credit score adjustment. Any authenticated patron can submit a report against another user. An administrator then reviews the report and either dismisses it (no credit deduction) or upholds it (deducts a specified number of credit points from the offender). A patron whose credit score (`num`) drops below `0` loses the ability to make new seat reservations.
+
+### Violation Status Values
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Pending — submitted, awaiting admin review |
+| `2` | Dismissed — admin reviewed and dismissed the report |
+| `3` | Upheld — admin confirmed the violation; credit deducted |
+
+---
+
+## GET /api/libraryVolation — List Violations (paginated)
+
+Returns a paginated list of violation reports.
+
+**Authentication:** Required  
+**Permission:** `libraryVolation:list`
+
+### Query Parameters
+
+<ParamField query="page" type="integer">
+  Zero-based page number (Spring `Pageable`). Defaults to `0`.
+</ParamField>
+
+<ParamField query="size" type="integer">
+  Number of records per page. Defaults to `20`.
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="content" type="array">
+  Array of violation objects for the current page.
+
+  <Expandable title="Violation object">
+    <ResponseField name="id" type="integer">
+      Auto-generated primary key.
+    </ResponseField>
+    <ResponseField name="sendId" type="long">
+      User ID of the patron who submitted the report.
+    </ResponseField>
+    <ResponseField name="sendName" type="string">
+      Username of the reporting patron.
+    </ResponseField>
+    <ResponseField name="receiveId" type="long">
+      User ID of the reported patron.
+    </ResponseField>
+    <ResponseField name="receiveName" type="string">
+      Nickname of the reported patron (resolved from the user service).
+    </ResponseField>
+    <ResponseField name="sendTime" type="string (timestamp)">
+      Timestamp when the report was submitted (auto-set by `@CreationTimestamp`).
+    </ResponseField>
+    <ResponseField name="status" type="integer">
+      Current report status: `0` = pending, `2` = dismissed, `3` = upheld.
+    </ResponseField>
+    <ResponseField name="num" type="integer">
+      Number of credit score points deducted from the offender. `0` for pending or dismissed reports.
+    </ResponseField>
+    <ResponseField name="remark" type="string">
+      Free-text description of the alleged violation.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalElements" type="integer">
+  Total number of violation reports matching the filter criteria.
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total number of pages at the requested page size.
+</ResponseField>
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryVolation?page=0&size=20"
+```
+
+---
+
+## GET /api/libraryVolation/download — Export to Excel
+
+Streams an Excel (`.xlsx`) file of all violation reports.
+
+**Authentication:** Required  
+**Permission:** `libraryVolation:list`
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/libraryVolation/download" \
+  --output violations.xlsx
+```
+
+---
+
+## POST /api/libraryVolation — Submit Violation Report
+
+Submits a new misconduct report against another patron. The server automatically populates `sendId`, `sendName` (from the current security context), `receiveName` (from the user service), `status` (`0` = pending), and `num` (`0`).
+
+**Authentication:** Required  
+**Permission:** `libraryVolation:add`
+
+### Request Body
+
+<ParamField body="receiveId" type="long" required>
+  User ID of the patron being reported.
+</ParamField>
+
+<ParamField body="remark" type="string">
+  Free-text description of the alleged misconduct (e.g. `"Loud phone call in silent reading zone"`).
+</ParamField>
+
+<Note>
+  `sendId`, `sendName`, `receiveName`, `status`, and `num` are all set automatically by the server and must not be included in the request body.
+</Note>
+
+### Response Fields
+
+<ResponseField name="id" type="integer">
+  Auto-generated ID of the new violation report.
+</ResponseField>
+
+<ResponseField name="sendId" type="long">
+  ID of the reporting patron (current user).
+</ResponseField>
+
+<ResponseField name="sendName" type="string">
+  Username of the reporting patron.
+</ResponseField>
+
+<ResponseField name="receiveId" type="long">
+  ID of the reported patron.
+</ResponseField>
+
+<ResponseField name="receiveName" type="string">
+  Nickname of the reported patron, resolved server-side.
+</ResponseField>
+
+<ResponseField name="sendTime" type="string (timestamp)">
+  Auto-set creation timestamp.
+</ResponseField>
+
+<ResponseField name="status" type="integer">
+  Always `0` (pending) for a newly submitted report.
+</ResponseField>
+
+<ResponseField name="num" type="integer">
+  Always `0` for a newly submitted report.
+</ResponseField>
+
+<ResponseField name="remark" type="string">
+  Violation description as provided.
+</ResponseField>
+
+### Example
+
+```bash
+# Submit a violation report
+curl -X POST http://localhost:8000/api/libraryVolation \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"receiveId": 42, "remark": "Noisy phone call in silent zone"}'
+```
+
+**Sample response (HTTP 201 Created):**
+
+```json
+{
+  "id": 7,
+  "sendId": 3,
+  "sendName": "jdoe",
+  "receiveId": 42,
+  "receiveName": "Jane Smith",
+  "sendTime": "2024-03-15T11:00:00.000+00:00",
+  "status": 0,
+  "num": 0,
+  "remark": "Noisy phone call in silent zone"
+}
+```
+
+---
+
+## PUT /api/libraryVolation — Update Violation
+
+Updates fields on an existing violation report. The server re-resolves `receiveName` from the user service based on the supplied `receiveId`.
+
+**Authentication:** Required  
+**Permission:** `libraryVolation:edit`
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  ID of the violation report to update.
+</ParamField>
+
+<ParamField body="receiveId" type="long">
+  Updated reported-patron ID. `receiveName` is re-resolved automatically.
+</ParamField>
+
+<ParamField body="remark" type="string">
+  Updated violation description.
+</ParamField>
+
+<ParamField body="status" type="integer">
+  Updated report status.
+</ParamField>
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8000/api/libraryVolation \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 7, "remark": "Noisy phone call — confirmed by staff witness"}'
+```
+
+A successful update returns HTTP `204 No Content`.
+
+---
+
+## DELETE /api/libraryVolation — Delete Violations
+
+Deletes one or more violation reports by their IDs.
+
+**Authentication:** Required  
+**Permission:** `libraryVolation:del`
+
+### Request Body
+
+<ParamField body="ids" type="integer[]" required>
+  JSON array of violation IDs to delete, e.g. `[7, 8]`.
+</ParamField>
+
+### Example
+
+```bash
+curl -X DELETE http://localhost:8000/api/libraryVolation \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[7, 8]'
+```
+
+A successful deletion returns HTTP `200 OK`.
+
+---
+
+## POST /api/libraryVolation/chuli — Process Violation (Admin)
+
+An administrator reviews a pending violation report and either dismisses it or upholds it with a credit score deduction. If upheld, the specified number of points is deducted from the offender's credit score. If dismissed (`status = 2`), `num` is forced to `0` regardless of what was submitted.
+
+**Authentication:** Required  
+**Permission:** `libraryVolation:chuli`
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  ID of the violation report to process.
+</ParamField>
+
+<ParamField body="status" type="integer" required>
+  Resolution decision:
+  - `2` — Dismiss the report (no credit deduction; `num` is forced to `0`).
+  - `3` — Uphold the report (deduct `num` points from the offender's credit score).
+</ParamField>
+
+<ParamField body="num" type="integer">
+  Number of credit score points to deduct from the offender. Only meaningful when `status = 3`. Ignored (set to `0`) when `status = 2`.
+</ParamField>
+
+### Behavior
+
+1. If `status == 2`, the server overrides `num` to `0`.
+2. The violation record's `status` and `num` are updated.
+3. The offender's current credit score is retrieved, and `num` points are subtracted from it.
+4. Patrons whose resulting credit score is below `0` will be blocked from making new reservations.
+
+### Example
+
+```bash
+# Process violation (admin deducts 10 points)
+curl -X POST http://localhost:8000/api/libraryVolation/chuli \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 7, "status": 3, "num": 10}'
+
+# Dismiss a violation (no credit deduction)
+curl -X POST http://localhost:8000/api/libraryVolation/chuli \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 8, "status": 2, "num": 0}'
+```
+
+A successful process returns HTTP `200 OK`.
